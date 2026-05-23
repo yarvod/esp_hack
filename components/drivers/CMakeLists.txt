@@ -6,5 +6,5 @@ idf_component_register(
         "src/sdcard.c"
         "src/ssd1306.c"
     INCLUDE_DIRS "include"
-    REQUIRES driver esp_adc fatfs sdmmc esp_timer
+    REQUIRES driver esp_adc fatfs sdmmc esp_timer esp_driver_i2c
 )

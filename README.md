@@ -36,7 +36,7 @@ Reserved pins intentionally not used: GPIO8, GPIO9, GPIO10, GPIO11, GPIO12, GPIO
     │       ├── home_screen.c
     │       ├── wifi_app.c
     │       ├── bluetooth_app.c
-    │       ├── flashka_app.c
+    │       ├── sd_flash_app.c
     │       └── simple_app_screen.c
     ├── core/
     │   ├── include/core/
@@ -72,7 +72,7 @@ Reserved pins intentionally not used: GPIO8, GPIO9, GPIO10, GPIO11, GPIO12, GPIO
 - `drivers`: hardware-facing code only. SSD1306 framebuffer, shared ADC service, joystick polling with deadzone/repeat/long-press, battery smoothing, SD mount via `esp_vfs_fat_sdspi_mount`.
 - `core`: event queue, input actions, app registry, navigation stack, screen lifecycle and animation state.
 - `ui`: lightweight monochrome UI primitives, font, status bar, widgets, menu and carousel renderers.
-- `apps`: boot screen, main carousel and initial WiFi/Bluetooth/Flashka app placeholders.
+- `apps`: boot screen, main carousel and initial WiFi/Bluetooth/SD flash app placeholders.
 - `system`: logger, NVS-backed settings, power manager stub and storage abstraction.
 
 Every screen uses the same lifecycle:
@@ -82,6 +82,7 @@ on_enter -> on_input -> on_update -> on_render -> on_exit
 ```
 
 Input is normalized to `UP`, `DOWN`, `LEFT`, `RIGHT`, `SELECT`, `BACK`, so the physical joystick can be replaced without changing application code.
+Current joystick mapping: short press is `SELECT`, long press is system `BACK`.
 
 ## Build
 

@@ -8,6 +8,7 @@ typedef struct {
     const char *title;
     const char *lines[5];
     size_t line_count;
+    size_t selected;
 } simple_app_screen_t;
 
 void simple_app_screen_init(simple_app_screen_t *app, const char *id, const char *title,

@@ -1,7 +1,6 @@
 #include "drivers/ssd1306.h"
 
 #include <string.h>
-#include "driver/i2c.h"
 #include "esp_check.h"
 #include "esp_log.h"
 
@@ -17,7 +16,7 @@ static esp_err_t write_bytes(ssd1306_t *display, uint8_t control, const uint8_t 
     ESP_RETURN_ON_FALSE(len <= 16, ESP_ERR_INVALID_SIZE, TAG, "packet too large");
     packet[0] = control;
     memcpy(&packet[1], data, len);
-    return i2c_master_write_to_device(display->i2c_port, display->address, packet, len + 1, pdMS_TO_TICKS(100));
+    return i2c_master_transmit(display->device, packet, len + 1, 100);
 }
 
 static esp_err_t command(ssd1306_t *display, uint8_t cmd)
@@ -35,20 +34,22 @@ esp_err_t ssd1306_init(ssd1306_t *display, int i2c_port, gpio_num_t sda, gpio_nu
     display->address = SSD1306_I2C_ADDR;
     display->clock_hz = 400000;
 
-    i2c_config_t conf = {
-        .mode = I2C_MODE_MASTER,
+    i2c_master_bus_config_t bus_config = {
+        .i2c_port = i2c_port,
         .sda_io_num = sda,
         .scl_io_num = scl,
-        .sda_pullup_en = GPIO_PULLUP_ENABLE,
-        .scl_pullup_en = GPIO_PULLUP_ENABLE,
-        .master.clk_speed = display->clock_hz,
+        .clk_source = I2C_CLK_SRC_DEFAULT,
+        .glitch_ignore_cnt = 7,
+        .flags.enable_internal_pullup = true,
     };
-    ESP_RETURN_ON_ERROR(i2c_param_config(i2c_port, &conf), TAG, "i2c param config failed");
-    esp_err_t err = i2c_driver_install(i2c_port, conf.mode, 0, 0, 0);
-    if (err != ESP_OK && err != ESP_ERR_INVALID_STATE) {
-        ESP_LOGE(TAG, "i2c driver install failed: %s", esp_err_to_name(err));
-        return err;
-    }
+    ESP_RETURN_ON_ERROR(i2c_new_master_bus(&bus_config, &display->bus), TAG, "i2c bus init failed");
+
+    i2c_device_config_t dev_config = {
+        .dev_addr_length = I2C_ADDR_BIT_LEN_7,
+        .device_address = display->address,
+        .scl_speed_hz = display->clock_hz,
+    };
+    ESP_RETURN_ON_ERROR(i2c_master_bus_add_device(display->bus, &dev_config, &display->device), TAG, "i2c device add failed");
 
     const uint8_t init[] = {
         0xAE, 0x20, 0x00, 0xB0, 0xC8, 0x00, 0x10, 0x40,

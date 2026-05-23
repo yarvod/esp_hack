@@ -42,5 +42,5 @@ void ui_carousel_render(ui_t *ui, const ui_carousel_item_t *items, size_t count,
     draw_item(ui, base + 64, &items[right], false);
     draw_item(ui, base, &items[selected], true);
 
-    ui_draw_text_aligned(ui, 0, 58, UI_WIDTH, "<  OK  >", UI_ALIGN_CENTER, true);
+    ui_draw_text_aligned(ui, 0, 56, UI_WIDTH, "<  OK  >", UI_ALIGN_CENTER, true);
 }

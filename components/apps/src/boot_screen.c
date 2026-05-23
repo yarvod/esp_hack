@@ -2,6 +2,7 @@
 
 #include <string.h>
 #include "core/context.h"
+#include "sdkconfig.h"
 #include "ui/status_bar.h"
 #include "ui/widgets.h"
 
@@ -33,12 +34,13 @@ static void boot_on_update(core_context_t *ctx, core_screen_t *screen, uint32_t 
 {
     boot_screen_state_t *boot = (boot_screen_state_t *)screen->user_data;
     boot->elapsed_ms += dt_ms;
-    uint8_t progress = boot->elapsed_ms >= 1600 ? 100 : (uint8_t)(boot->elapsed_ms * 100 / 1600);
+    uint32_t progress_ms = CONFIG_HANDHELD_BOOT_SCREEN_MS > 200 ? CONFIG_HANDHELD_BOOT_SCREEN_MS - 200 : CONFIG_HANDHELD_BOOT_SCREEN_MS;
+    uint8_t progress = boot->elapsed_ms >= progress_ms ? 100 : (uint8_t)(boot->elapsed_ms * 100 / progress_ms);
     if (progress != boot->progress) {
         boot->progress = progress;
         core_nav_mark_dirty(&ctx->nav);
     }
-    if (boot->elapsed_ms >= 1800) {
+    if (boot->elapsed_ms >= CONFIG_HANDHELD_BOOT_SCREEN_MS) {
         apps_show_home(ctx);
     }
 }
@@ -52,7 +54,7 @@ static void boot_on_render(core_context_t *ctx, core_screen_t *screen, ui_t *ui)
     ui_draw_text_aligned(ui, 0, 32, UI_WIDTH, "HANDHELD OS", UI_ALIGN_CENTER, true);
     ui_widget_progress_bar(ui, 20, 47, 88, 9, boot->progress);
     int dots = (boot->elapsed_ms / 250) % 4;
-    ui_draw_text(ui, 52, 58, dots == 0 ? "   " : dots == 1 ? ".  " : dots == 2 ? ".. " : "...", true);
+    ui_draw_text(ui, 52, 56, dots == 0 ? "   " : dots == 1 ? ".  " : dots == 2 ? ".. " : "...", true);
 }
 
 esp_err_t apps_show_boot(core_context_t *ctx)

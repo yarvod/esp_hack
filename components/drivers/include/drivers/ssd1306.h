@@ -3,6 +3,7 @@
 #include <stdbool.h>
 #include <stdint.h>
 #include "driver/gpio.h"
+#include "driver/i2c_master.h"
 #include "esp_err.h"
 
 #define SSD1306_WIDTH 128
@@ -15,6 +16,8 @@ typedef struct {
     gpio_num_t scl;
     uint8_t address;
     uint32_t clock_hz;
+    i2c_master_bus_handle_t bus;
+    i2c_master_dev_handle_t device;
     uint8_t buffer[SSD1306_BUFFER_SIZE];
     bool initialized;
 } ssd1306_t;

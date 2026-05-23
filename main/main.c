@@ -9,10 +9,10 @@
 #include "drivers/board_pins.h"
 #include "drivers/joystick.h"
 #include "drivers/ssd1306.h"
-#include "driver/i2c.h"
 #include "esp_check.h"
 #include "esp_log.h"
 #include "esp_timer.h"
+#include "sdkconfig.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
 #include "system/logger.h"
@@ -81,7 +81,7 @@ static void battery_callback(void *ctx, const battery_status_t *status)
 static esp_err_t init_hardware(void)
 {
     ESP_RETURN_ON_ERROR(analog_init(), TAG, "analog init failed");
-    ESP_RETURN_ON_ERROR(ssd1306_init(&s_display, I2C_NUM_0, BOARD_PIN_OLED_SDA, BOARD_PIN_OLED_SCL), TAG, "display init failed");
+    ESP_RETURN_ON_ERROR(ssd1306_init(&s_display, 0, BOARD_PIN_OLED_SDA, BOARD_PIN_OLED_SCL), TAG, "display init failed");
     ESP_RETURN_ON_ERROR(ui_init(&s_ui, &s_display), TAG, "ui init failed");
 
     battery_config_t battery_cfg = {
@@ -100,11 +100,11 @@ static esp_err_t init_hardware(void)
         .x_gpio = BOARD_PIN_JOY_X,
         .y_gpio = BOARD_PIN_JOY_Y,
         .sw_gpio = BOARD_PIN_JOY_SW,
-        .deadzone_raw = 650,
+        .deadzone_raw = CONFIG_HANDHELD_JOYSTICK_DEADZONE_RAW,
         .poll_period_ms = 20,
-        .repeat_delay_ms = 350,
-        .repeat_interval_ms = 120,
-        .long_press_ms = 700,
+        .repeat_delay_ms = 650,
+        .repeat_interval_ms = 250,
+        .long_press_ms = 850,
         .callback = joystick_callback,
         .callback_ctx = &s_core,
     };
@@ -145,6 +145,12 @@ void app_main(void)
     core_context_init(&s_core, &s_ui);
     ESP_ERROR_CHECK(core_event_bus_init(&s_core.events, 24));
     ESP_ERROR_CHECK(init_hardware());
+#if CONFIG_HANDHELD_SD_MOUNT_ON_BOOT
+    esp_err_t sd_err = storage_mount_sd();
+    if (sd_err != ESP_OK) {
+        ESP_LOGW(TAG, "SD mount on boot failed: %s", esp_err_to_name(sd_err));
+    }
+#endif
     ESP_ERROR_CHECK(apps_register_all(&s_core));
     ESP_ERROR_CHECK(apps_show_boot(&s_core));
     ESP_ERROR_CHECK(battery_start());

@@ -1,6 +1,8 @@
 #include "drivers/analog.h"
 
 #include <string.h>
+#include "esp_adc/adc_cali.h"
+#include "esp_adc/adc_cali_scheme.h"
 #include "esp_adc/adc_oneshot.h"
 #include "esp_check.h"
 #include "esp_log.h"
@@ -10,8 +12,11 @@ static const char *TAG = "analog";
 typedef struct {
     bool initialized;
     adc_oneshot_unit_handle_t unit[ADC_UNIT_2 + 1];
+    adc_cali_handle_t cali[ADC_UNIT_2 + 1][ADC_CHANNEL_9 + 1];
     bool unit_ready[ADC_UNIT_2 + 1];
     bool channel_ready[ADC_UNIT_2 + 1][ADC_CHANNEL_9 + 1];
+    bool cali_ready[ADC_UNIT_2 + 1][ADC_CHANNEL_9 + 1];
+    bool cali_unsupported[ADC_UNIT_2 + 1][ADC_CHANNEL_9 + 1];
 } analog_state_t;
 
 static analog_state_t s_state;
@@ -46,6 +51,38 @@ static esp_err_t ensure_unit(adc_unit_t unit)
     }
     s_state.unit_ready[unit] = true;
     return ESP_OK;
+}
+
+static esp_err_t ensure_calibration(adc_unit_t unit, adc_channel_t channel)
+{
+    if (s_state.cali_ready[unit][channel]) {
+        return ESP_OK;
+    }
+    if (s_state.cali_unsupported[unit][channel]) {
+        return ESP_ERR_NOT_SUPPORTED;
+    }
+
+#if ADC_CALI_SCHEME_CURVE_FITTING_SUPPORTED
+    adc_cali_curve_fitting_config_t cali_cfg = {
+        .unit_id = unit,
+        .chan = channel,
+        .atten = ADC_ATTEN_DB_12,
+        .bitwidth = ADC_BITWIDTH_DEFAULT,
+    };
+    esp_err_t err = adc_cali_create_scheme_curve_fitting(&cali_cfg, &s_state.cali[unit][channel]);
+    if (err == ESP_OK) {
+        s_state.cali_ready[unit][channel] = true;
+        ESP_LOGI(TAG, "calibration ready adc_unit=%d channel=%d", unit, channel);
+        return ESP_OK;
+    }
+    s_state.cali_unsupported[unit][channel] = true;
+    ESP_LOGW(TAG, "adc calibration unavailable unit=%d channel=%d: %s", unit, channel, esp_err_to_name(err));
+    return err;
+#else
+    s_state.cali_unsupported[unit][channel] = true;
+    ESP_LOGW(TAG, "adc calibration scheme is not supported");
+    return ESP_ERR_NOT_SUPPORTED;
+#endif
 }
 
 esp_err_t analog_configure_gpio(gpio_num_t gpio)
@@ -91,14 +128,26 @@ esp_err_t analog_read_raw(gpio_num_t gpio, int *raw)
 
 esp_err_t analog_read_mv(gpio_num_t gpio, uint32_t *millivolts)
 {
-    ESP_RETURN_ON_FALSE(millivolts != NULL, ESP_ERR_INVALID_ARG, TAG, "millivolts is null");
-
     int raw = 0;
-    esp_err_t err = analog_read_raw(gpio, &raw);
-    if (err != ESP_OK) {
-        return err;
+    return analog_read_raw_mv(gpio, &raw, millivolts);
+}
+
+esp_err_t analog_read_raw_mv(gpio_num_t gpio, int *raw, uint32_t *millivolts)
+{
+    ESP_RETURN_ON_FALSE(raw != NULL && millivolts != NULL, ESP_ERR_INVALID_ARG, TAG, "bad args");
+    ESP_RETURN_ON_ERROR(analog_read_raw(gpio, raw), TAG, "raw read failed");
+
+    adc_unit_t unit = ADC_UNIT_1;
+    adc_channel_t channel = ADC_CHANNEL_0;
+    ESP_RETURN_ON_ERROR(adc_oneshot_io_to_channel(gpio, &unit, &channel), TAG, "io to channel failed");
+
+    int calibrated_mv = 0;
+    if (ensure_calibration(unit, channel) == ESP_OK &&
+        adc_cali_raw_to_voltage(s_state.cali[unit][channel], *raw, &calibrated_mv) == ESP_OK) {
+        *millivolts = (uint32_t)calibrated_mv;
+        return ESP_OK;
     }
 
-    *millivolts = (uint32_t)((raw * 3300U) / 4095U);
+    *millivolts = (uint32_t)((*raw * 3300U) / 4095U);
     return ESP_OK;
 }

@@ -12,7 +12,7 @@ config HANDHELD_BOOT_SCREEN_MS
 config HANDHELD_JOYSTICK_DEADZONE_RAW
     int "Joystick deadzone, raw ADC units"
     range 100 1800
-    default 650
+    default 950
 
 config HANDHELD_SD_MOUNT_ON_BOOT
     bool "Mount SD card on boot"

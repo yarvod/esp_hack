@@ -16,7 +16,7 @@ esp_err_t storage_mount_sd(void)
         .clk = BOARD_PIN_SD_CLK,
         .miso = BOARD_PIN_SD_MISO,
         .mount_point = "/sdcard",
-        .max_freq_khz = 4000,
+        .max_freq_khz = 400,
         .format_if_mount_failed = false,
     };
     return sdcard_mount(&cfg);
