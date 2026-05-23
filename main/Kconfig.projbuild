@@ -1,0 +1,21 @@
+menu "Handheld Configuration"
+
+config HANDHELD_DEVICE_NAME
+    string "Device name"
+    default "ESP C6 Handheld"
+
+config HANDHELD_BOOT_SCREEN_MS
+    int "Boot screen duration, ms"
+    range 500 5000
+    default 1800
+
+config HANDHELD_JOYSTICK_DEADZONE_RAW
+    int "Joystick deadzone, raw ADC units"
+    range 100 1800
+    default 650
+
+config HANDHELD_SD_MOUNT_ON_BOOT
+    bool "Mount SD card on boot"
+    default n
+
+endmenu
