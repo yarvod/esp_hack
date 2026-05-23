@@ -44,6 +44,17 @@ static joystick_event_type_t dominant_direction(int x, int y, bool *valid)
 {
     int dx = x - s_joy.center_x;
     int dy = y - s_joy.center_y;
+    if (s_joy.config.swap_xy) {
+        int tmp = dx;
+        dx = dy;
+        dy = tmp;
+    }
+    if (s_joy.config.invert_x) {
+        dx = -dx;
+    }
+    if (s_joy.config.invert_y) {
+        dy = -dy;
+    }
     *valid = false;
 
     int abs_x = dx >= 0 ? dx : -dx;
@@ -193,6 +204,8 @@ esp_err_t joystick_init(const joystick_config_t *config)
 
     s_joy.button_changed_us = esp_timer_get_time();
     s_joy.initialized = true;
+    ESP_LOGI(TAG, "axis transform swap_xy=%d invert_x=%d invert_y=%d",
+             s_joy.config.swap_xy, s_joy.config.invert_x, s_joy.config.invert_y);
     return ESP_OK;
 }
 

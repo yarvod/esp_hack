@@ -3,6 +3,7 @@ idf_component_register(
         "src/apps_registry.c"
         "src/boot_screen.c"
         "src/sd_flash_app.c"
+        "src/snake_app.c"
         "src/home_screen.c"
         "src/simple_app_screen.c"
         "src/wifi_app.c"

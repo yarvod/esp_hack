@@ -20,6 +20,18 @@
 #include "system/settings.h"
 #include "system/storage.h"
 
+#ifndef CONFIG_HANDHELD_JOYSTICK_SWAP_XY
+#define CONFIG_HANDHELD_JOYSTICK_SWAP_XY 0
+#endif
+
+#ifndef CONFIG_HANDHELD_JOYSTICK_INVERT_X
+#define CONFIG_HANDHELD_JOYSTICK_INVERT_X 0
+#endif
+
+#ifndef CONFIG_HANDHELD_JOYSTICK_INVERT_Y
+#define CONFIG_HANDHELD_JOYSTICK_INVERT_Y 0
+#endif
+
 static const char *TAG = "handheld";
 
 static core_context_t s_core;
@@ -105,6 +117,9 @@ static esp_err_t init_hardware(void)
         .repeat_delay_ms = 650,
         .repeat_interval_ms = 250,
         .long_press_ms = 850,
+        .swap_xy = CONFIG_HANDHELD_JOYSTICK_SWAP_XY,
+        .invert_x = CONFIG_HANDHELD_JOYSTICK_INVERT_X,
+        .invert_y = CONFIG_HANDHELD_JOYSTICK_INVERT_Y,
         .callback = joystick_callback,
         .callback_ctx = &s_core,
     };

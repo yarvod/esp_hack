@@ -1,5 +1,6 @@
 #pragma once
 
+#include <stdbool.h>
 #include <stdint.h>
 #include "driver/gpio.h"
 #include "esp_err.h"
@@ -36,6 +37,9 @@ typedef struct {
     uint32_t repeat_delay_ms;
     uint32_t repeat_interval_ms;
     uint32_t long_press_ms;
+    bool swap_xy;
+    bool invert_x;
+    bool invert_y;
     joystick_event_cb_t callback;
     void *callback_ctx;
 } joystick_config_t;

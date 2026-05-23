@@ -14,6 +14,18 @@ config HANDHELD_JOYSTICK_DEADZONE_RAW
     range 100 1800
     default 950
 
+config HANDHELD_JOYSTICK_SWAP_XY
+    bool "Swap joystick X/Y axes"
+    default y
+
+config HANDHELD_JOYSTICK_INVERT_X
+    bool "Invert joystick X axis after swap"
+    default y
+
+config HANDHELD_JOYSTICK_INVERT_Y
+    bool "Invert joystick Y axis after swap"
+    default n
+
 config HANDHELD_SD_MOUNT_ON_BOOT
     bool "Mount SD card on boot"
     default n
