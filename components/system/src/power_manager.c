@@ -24,7 +24,6 @@ typedef struct {
 
 static power_state_t s_power;
 static RTC_DATA_ATTR uint32_t s_wake_gate_magic;
-static RTC_DATA_ATTR uint8_t s_wake_gate_clicks;
 
 esp_err_t power_manager_init(const power_manager_config_t *config)
 {
@@ -116,13 +115,11 @@ static void wait_wake_button_idle_before_sleep(gpio_num_t wake_gpio)
 static void wake_gate_clear(void)
 {
     s_wake_gate_magic = 0;
-    s_wake_gate_clicks = 0;
 }
 
 static void enter_deep_sleep_internal(gpio_num_t wake_gpio) __attribute__((noreturn));
 
-void power_manager_handle_deep_sleep_wakeup_gate(gpio_num_t wake_gpio, uint8_t required_clicks,
-                                                 uint32_t window_ms)
+void power_manager_handle_deep_sleep_wakeup_gate(gpio_num_t wake_gpio, uint32_t hold_ms)
 {
     esp_sleep_wakeup_cause_t cause = esp_sleep_get_wakeup_cause();
     esp_reset_reason_t reset_reason = esp_reset_reason();
@@ -138,18 +135,8 @@ void power_manager_handle_deep_sleep_wakeup_gate(gpio_num_t wake_gpio, uint8_t r
         return;
     }
 
-    if (required_clicks < 2) {
-        wake_gate_clear();
-        return;
-    }
-    if (window_ms < 500) {
-        window_ms = 500;
-    }
-
-    if (cause == ESP_SLEEP_WAKEUP_TIMER) {
-        ESP_LOGI(TAG, "wake gate expired at %u/%u clicks", s_wake_gate_clicks, required_clicks);
-        wake_gate_clear();
-        enter_deep_sleep_internal(wake_gpio);
+    if (hold_ms < 500) {
+        hold_ms = 500;
     }
 
     if (cause != ESP_SLEEP_WAKEUP_GPIO && cause != ESP_SLEEP_WAKEUP_EXT0 && cause != ESP_SLEEP_WAKEUP_EXT1) {
@@ -162,20 +149,19 @@ void power_manager_handle_deep_sleep_wakeup_gate(gpio_num_t wake_gpio, uint8_t r
         return;
     }
 
-    wait_wake_button_idle_before_sleep(wake_gpio);
-    if (s_wake_gate_clicks < required_clicks) {
-        ++s_wake_gate_clicks;
+    ESP_LOGI(TAG, "wake hold gate: holding for %ums", hold_ms);
+    int64_t deadline_us = esp_timer_get_time() + (int64_t)hold_ms * 1000;
+    while (esp_timer_get_time() < deadline_us) {
+        if (!wake_button_pressed(wake_gpio)) {
+            ESP_LOGI(TAG, "wake hold gate released early");
+            wake_gate_clear();
+            enter_deep_sleep_internal(wake_gpio);
+        }
+        vTaskDelay(pdMS_TO_TICKS(25));
     }
 
-    ESP_LOGI(TAG, "deep sleep wake gate: click %u/%u", s_wake_gate_clicks, required_clicks);
-    if (s_wake_gate_clicks >= required_clicks) {
-        wake_gate_clear();
-        ESP_LOGI(TAG, "wake gate accepted");
-        return;
-    }
-
-    (void)window_ms;
-    enter_deep_sleep_internal(wake_gpio);
+    wake_gate_clear();
+    ESP_LOGI(TAG, "wake hold accepted");
 }
 
 static void deep_sleep_task(void *arg)
@@ -191,7 +177,6 @@ esp_err_t power_manager_request_deep_sleep(gpio_num_t wake_gpio)
         return ESP_OK;
     }
     s_wake_gate_magic = WAKE_GATE_MAGIC;
-    s_wake_gate_clicks = 0;
     BaseType_t ok = xTaskCreate(deep_sleep_task, "deep_sleep", 3072, (void *)(intptr_t)wake_gpio, 10,
                                 &s_power.sleep_task);
     if (ok != pdPASS) {

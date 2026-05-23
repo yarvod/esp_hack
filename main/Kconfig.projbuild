@@ -26,15 +26,10 @@ config HANDHELD_JOYSTICK_INVERT_Y
     bool "Invert joystick Y axis after swap"
     default n
 
-config HANDHELD_WAKE_CLICK_COUNT
-    int "Deep sleep wake click count"
-    range 2 5
-    default 3
-
-config HANDHELD_WAKE_CLICK_WINDOW_MS
-    int "Deep sleep wake click window, ms"
-    range 700 4000
-    default 2500
+config HANDHELD_WAKE_HOLD_MS
+    int "Deep sleep wake hold duration, ms"
+    range 500 8000
+    default 3000
 
 config HANDHELD_SD_MOUNT_ON_BOOT
     bool "Mount SD card on boot"

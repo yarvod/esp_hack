@@ -69,8 +69,8 @@ static void sleep_on_render(core_context_t *ctx, core_screen_t *screen, ui_t *ui
     ui_status_bar_render(ui, "SLEEP");
     ui_widget_panel(ui, 3, UI_CONTENT_Y + 2, UI_WIDTH - 6, UI_CONTENT_HEIGHT - 5, "DEEP SLEEP");
     ui_draw_text_aligned(ui, 0, UI_CONTENT_Y + 18, UI_WIDTH, "LOW POWER MODE", UI_ALIGN_CENTER, true);
-    ui_draw_text_aligned(ui, 0, UI_CONTENT_Y + 31, UI_WIDTH, "WAKE: 3 FAST", UI_ALIGN_CENTER, true);
-    ui_draw_text_aligned(ui, 0, UI_CONTENT_Y + 42, UI_WIDTH, "CENTER CLICKS", UI_ALIGN_CENTER, true);
+    ui_draw_text_aligned(ui, 0, UI_CONTENT_Y + 31, UI_WIDTH, "WAKE: HOLD", UI_ALIGN_CENTER, true);
+    ui_draw_text_aligned(ui, 0, UI_CONTENT_Y + 42, UI_WIDTH, "CENTER 3 SEC", UI_ALIGN_CENTER, true);
     if (!state->sleep_started) {
         ui_widget_progress_bar(ui, 18, 56, 92, 6, (uint8_t)((state->elapsed_ms * 100) / 700));
     }

@@ -86,7 +86,7 @@ on_enter -> on_input -> on_update -> on_render -> on_exit
 Input is normalized to `UP`, `DOWN`, `LEFT`, `RIGHT`, `SELECT`, `BACK`, so the physical joystick can be replaced without changing application code.
 Current joystick mapping: short press is `SELECT`, long press is system `BACK`.
 
-The `Sleep` app enters ESP32-C6 deep sleep and uses GPIO2 as an active-low wake source. The first center-button click wakes the chip, then the early boot gate requires two more quick center clicks before the firmware continues; otherwise it returns to deep sleep.
+The `Sleep` app enters ESP32-C6 deep sleep and uses GPIO2 as an active-low wake source. Hold the center button for 3 seconds to pass the early boot wake gate; releasing early returns the device to deep sleep.
 
 ## Build
 
