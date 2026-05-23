@@ -5,5 +5,5 @@ idf_component_register(
         "src/settings.c"
         "src/storage.c"
     INCLUDE_DIRS "include"
-    REQUIRES nvs_flash drivers
+    REQUIRES nvs_flash drivers esp_driver_gpio esp_hw_support
 )

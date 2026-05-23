@@ -25,5 +25,6 @@ typedef struct {
 esp_err_t ssd1306_init(ssd1306_t *display, int i2c_port, gpio_num_t sda, gpio_num_t scl);
 esp_err_t ssd1306_clear(ssd1306_t *display);
 esp_err_t ssd1306_flush(ssd1306_t *display);
+esp_err_t ssd1306_set_display_on(ssd1306_t *display, bool on);
 void ssd1306_draw_pixel(ssd1306_t *display, int x, int y, bool color);
 void ssd1306_invert_region(ssd1306_t *display, int x, int y, int w, int h);

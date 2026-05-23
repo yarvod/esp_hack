@@ -32,6 +32,14 @@
 #define CONFIG_HANDHELD_JOYSTICK_INVERT_Y 0
 #endif
 
+#ifndef CONFIG_HANDHELD_WAKE_CLICK_COUNT
+#define CONFIG_HANDHELD_WAKE_CLICK_COUNT 3
+#endif
+
+#ifndef CONFIG_HANDHELD_WAKE_CLICK_WINDOW_MS
+#define CONFIG_HANDHELD_WAKE_CLICK_WINDOW_MS 2500
+#endif
+
 static const char *TAG = "handheld";
 
 static core_context_t s_core;
@@ -150,6 +158,9 @@ void app_main(void)
 {
     ESP_ERROR_CHECK(system_logger_init());
     ESP_LOGI(TAG, "booting ESP32-C6 handheld framework");
+    power_manager_handle_deep_sleep_wakeup_gate(BOARD_PIN_JOY_SW,
+                                                CONFIG_HANDHELD_WAKE_CLICK_COUNT,
+                                                CONFIG_HANDHELD_WAKE_CLICK_WINDOW_MS);
     ESP_ERROR_CHECK(system_settings_init());
     ESP_ERROR_CHECK(storage_init());
     ESP_ERROR_CHECK(power_manager_init(&(power_manager_config_t) {

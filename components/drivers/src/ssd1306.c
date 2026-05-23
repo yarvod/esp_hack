@@ -91,6 +91,12 @@ esp_err_t ssd1306_flush(ssd1306_t *display)
     return ESP_OK;
 }
 
+esp_err_t ssd1306_set_display_on(ssd1306_t *display, bool on)
+{
+    ESP_RETURN_ON_FALSE(display != NULL && display->initialized, ESP_ERR_INVALID_STATE, TAG, "display not initialized");
+    return command(display, on ? 0xAF : 0xAE);
+}
+
 void ssd1306_draw_pixel(ssd1306_t *display, int x, int y, bool color)
 {
     if (display == NULL || x < 0 || x >= SSD1306_WIDTH || y < 0 || y >= SSD1306_HEIGHT) {

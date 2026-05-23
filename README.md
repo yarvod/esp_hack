@@ -37,6 +37,8 @@ Reserved pins intentionally not used: GPIO8, GPIO9, GPIO10, GPIO11, GPIO12, GPIO
     │       ├── wifi_app.c
     │       ├── bluetooth_app.c
     │       ├── sd_flash_app.c
+    │       ├── snake_app.c
+    │       ├── sleep_app.c
     │       └── simple_app_screen.c
     ├── core/
     │   ├── include/core/
@@ -72,8 +74,8 @@ Reserved pins intentionally not used: GPIO8, GPIO9, GPIO10, GPIO11, GPIO12, GPIO
 - `drivers`: hardware-facing code only. SSD1306 framebuffer, shared ADC service, joystick polling with deadzone/repeat/long-press, battery smoothing, SD mount via `esp_vfs_fat_sdspi_mount`.
 - `core`: event queue, input actions, app registry, navigation stack, screen lifecycle and animation state.
 - `ui`: lightweight monochrome UI primitives, font, status bar, widgets, menu and carousel renderers.
-- `apps`: boot screen, main carousel and initial WiFi/Bluetooth/SD flash app placeholders.
-- `system`: logger, NVS-backed settings, power manager stub and storage abstraction.
+- `apps`: boot screen, main carousel, WiFi/Bluetooth/SD flash placeholders, Snake and Sleep.
+- `system`: logger, NVS-backed settings, power manager with deep sleep wake gate and storage abstraction.
 
 Every screen uses the same lifecycle:
 
@@ -83,6 +85,8 @@ on_enter -> on_input -> on_update -> on_render -> on_exit
 
 Input is normalized to `UP`, `DOWN`, `LEFT`, `RIGHT`, `SELECT`, `BACK`, so the physical joystick can be replaced without changing application code.
 Current joystick mapping: short press is `SELECT`, long press is system `BACK`.
+
+The `Sleep` app enters ESP32-C6 deep sleep and uses GPIO2 as an active-low wake source. The first center-button click wakes the chip, then the early boot gate requires two more quick center clicks before the firmware continues; otherwise it returns to deep sleep.
 
 ## Build
 
