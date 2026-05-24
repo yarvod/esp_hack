@@ -12,6 +12,9 @@
 
 static const char *TAG = "sdcard";
 
+#define SDCARD_POWERUP_DELAY_MS 500
+#define SDCARD_STARTUP_CLOCK_BYTES 16
+
 typedef struct {
     sdcard_config_t config;
     sdmmc_card_t *card;
@@ -70,27 +73,7 @@ static uint8_t probe_command(const sdcard_config_t *config, uint8_t cmd, uint32_
 
 static void probe_card_spi(const sdcard_config_t *config)
 {
-    gpio_config_t out_cfg = {
-        .pin_bit_mask = (1ULL << config->cs) | (1ULL << config->mosi) | (1ULL << config->clk),
-        .mode = GPIO_MODE_OUTPUT,
-        .pull_up_en = GPIO_PULLUP_ENABLE,
-        .pull_down_en = GPIO_PULLDOWN_DISABLE,
-        .intr_type = GPIO_INTR_DISABLE,
-    };
-    gpio_config_t in_cfg = {
-        .pin_bit_mask = 1ULL << config->miso,
-        .mode = GPIO_MODE_INPUT,
-        .pull_up_en = GPIO_PULLUP_ENABLE,
-        .pull_down_en = GPIO_PULLDOWN_DISABLE,
-        .intr_type = GPIO_INTR_DISABLE,
-    };
-    gpio_config(&out_cfg);
-    gpio_config(&in_cfg);
-
-    gpio_set_level(config->cs, 1);
-    gpio_set_level(config->mosi, 1);
-    gpio_set_level(config->clk, 0);
-    for (int i = 0; i < 10; ++i) {
+    for (int i = 0; i < SDCARD_STARTUP_CLOCK_BYTES; ++i) {
         probe_transfer_byte(config, 0xFF);
     }
 
@@ -103,19 +86,49 @@ static void probe_card_spi(const sdcard_config_t *config)
 
 static void configure_line_pullups(const sdcard_config_t *config)
 {
-    const gpio_num_t pins[] = {
-        config->cs,
-        config->mosi,
-        config->miso,
-        config->clk,
+    const uint64_t out_mask = (1ULL << config->cs) | (1ULL << config->mosi) | (1ULL << config->clk);
+    const uint64_t in_mask = 1ULL << config->miso;
+
+    gpio_config_t out_cfg = {
+        .pin_bit_mask = out_mask,
+        .mode = GPIO_MODE_OUTPUT,
+        .pull_up_en = GPIO_PULLUP_ENABLE,
+        .pull_down_en = GPIO_PULLDOWN_DISABLE,
+        .intr_type = GPIO_INTR_DISABLE,
+    };
+    gpio_config_t in_cfg = {
+        .pin_bit_mask = in_mask,
+        .mode = GPIO_MODE_INPUT,
+        .pull_up_en = GPIO_PULLUP_ENABLE,
+        .pull_down_en = GPIO_PULLDOWN_DISABLE,
+        .intr_type = GPIO_INTR_DISABLE,
     };
 
-    for (size_t i = 0; i < sizeof(pins) / sizeof(pins[0]); ++i) {
-        gpio_reset_pin(pins[i]);
-        gpio_set_pull_mode(pins[i], GPIO_PULLUP_ONLY);
-    }
-    gpio_set_direction(config->cs, GPIO_MODE_OUTPUT);
+    gpio_config(&out_cfg);
+    gpio_config(&in_cfg);
+
+    gpio_set_pull_mode(config->cs, GPIO_PULLUP_ONLY);
+    gpio_set_pull_mode(config->mosi, GPIO_PULLUP_ONLY);
+    gpio_set_pull_mode(config->miso, GPIO_PULLUP_ONLY);
+    gpio_set_pull_mode(config->clk, GPIO_PULLUP_ONLY);
+
+    gpio_set_drive_capability(config->cs, GPIO_DRIVE_CAP_2);
+    gpio_set_drive_capability(config->mosi, GPIO_DRIVE_CAP_2);
+    gpio_set_drive_capability(config->clk, GPIO_DRIVE_CAP_2);
+
     gpio_set_level(config->cs, 1);
+    gpio_set_level(config->mosi, 1);
+    gpio_set_level(config->clk, 0);
+}
+
+static void log_line_levels(const sdcard_config_t *config, const char *stage)
+{
+    ESP_LOGI(TAG, "%s levels cs=%d mosi=%d miso=%d clk=%d",
+             stage,
+             gpio_get_level(config->cs),
+             gpio_get_level(config->mosi),
+             gpio_get_level(config->miso),
+             gpio_get_level(config->clk));
 }
 
 esp_err_t sdcard_mount(const sdcard_config_t *config)
@@ -135,6 +148,9 @@ esp_err_t sdcard_mount(const sdcard_config_t *config)
     }
 
     configure_line_pullups(&s_sd.config);
+    log_line_levels(&s_sd.config, "after pullups");
+    esp_rom_delay_us(SDCARD_POWERUP_DELAY_MS * 1000);
+
     ESP_LOGI(TAG, "mount start cs=%d mosi=%d miso=%d clk=%d freq=%luKHz",
              s_sd.config.cs, s_sd.config.mosi, s_sd.config.miso, s_sd.config.clk,
              (unsigned long)s_sd.config.max_freq_khz);

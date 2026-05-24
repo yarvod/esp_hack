@@ -11,7 +11,8 @@ idf_component_register(
         "src/home_screen.c"
         "src/simple_app_screen.c"
         "src/wifi_app.c"
+        "src/wifi_tools.c"
         "src/bluetooth_app.c"
     INCLUDE_DIRS "include"
-    REQUIRES core ui system drivers
+    REQUIRES core ui system drivers nvs_flash esp_wifi esp_event bt esp_http_server json
 )
