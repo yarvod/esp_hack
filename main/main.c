@@ -8,6 +8,7 @@
 #include "drivers/battery.h"
 #include "drivers/board_pins.h"
 #include "drivers/joystick.h"
+#include "drivers/rgb_led.h"
 #include "drivers/ssd1306.h"
 #include "esp_check.h"
 #include "esp_log.h"
@@ -96,6 +97,11 @@ static void battery_callback(void *ctx, const battery_status_t *status)
 
 static esp_err_t init_hardware(void)
 {
+    bool rgb_enabled = true;
+    uint8_t rgb_mode = RGB_LED_MODE_RAINBOW;
+    (void)system_settings_get_bool(RGB_LED_SETTING_ENABLED, true, &rgb_enabled);
+    (void)system_settings_get_u8(RGB_LED_SETTING_MODE, RGB_LED_MODE_RAINBOW, &rgb_mode);
+
     ESP_RETURN_ON_ERROR(analog_init(), TAG, "analog init failed");
     ESP_RETURN_ON_ERROR(ssd1306_init(&s_display, 0, BOARD_PIN_OLED_SDA, BOARD_PIN_OLED_SCL), TAG, "display init failed");
     ESP_RETURN_ON_ERROR(ui_init(&s_ui, &s_display), TAG, "ui init failed");
@@ -128,6 +134,17 @@ static esp_err_t init_hardware(void)
         .callback_ctx = &s_core,
     };
     ESP_RETURN_ON_ERROR(joystick_init(&joystick_cfg), TAG, "joystick init failed");
+
+    esp_err_t rgb_err = rgb_led_start(&(rgb_led_config_t) {
+        .gpio = BOARD_PIN_RGB_LED,
+        .enabled = rgb_enabled,
+        .mode = (rgb_led_mode_t)rgb_mode,
+        .max_brightness = 28,
+        .frame_period_ms = 30,
+    });
+    if (rgb_err != ESP_OK) {
+        ESP_LOGW(TAG, "rgb led start failed: %s", esp_err_to_name(rgb_err));
+    }
     return ESP_OK;
 }
 

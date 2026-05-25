@@ -5,6 +5,8 @@
 #define BOARD_PIN_OLED_SDA      GPIO_NUM_7
 #define BOARD_PIN_OLED_SCL      GPIO_NUM_6
 
+#define BOARD_PIN_RGB_LED       GPIO_NUM_8
+
 #define BOARD_PIN_JOY_X         GPIO_NUM_0
 #define BOARD_PIN_JOY_Y         GPIO_NUM_1
 #define BOARD_PIN_JOY_SW        GPIO_NUM_2

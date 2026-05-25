@@ -8,6 +8,7 @@ ESP-IDF firmware skeleton for a small OLED handheld device in the spirit of a Fl
 | --- | --- | --- |
 | OLED SSD1306 | SDA | 7 |
 | OLED SSD1306 | SCL | 6 |
+| RGB LED WS2812/SK6812 | DATA | 8 |
 | Joystick | VRX ADC | 0 |
 | Joystick | VRY ADC | 1 |
 | Joystick | SW pull-up | 2 |
@@ -17,7 +18,7 @@ ESP-IDF firmware skeleton for a small OLED handheld device in the spirit of a Fl
 | microSD SPI | CLK | 18 |
 | microSD SPI | MISO | 19 |
 
-Reserved pins intentionally not used: GPIO8, GPIO9, GPIO10, GPIO11, GPIO12, GPIO13, GPIO21, GPIO22, GPIO23.
+Reserved pins intentionally not used: GPIO9, GPIO10, GPIO11, GPIO12, GPIO13, GPIO21, GPIO22, GPIO23.
 
 ## Project Tree
 

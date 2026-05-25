@@ -3,6 +3,7 @@ idf_component_register(
         "src/apps_registry.c"
         "src/boot_screen.c"
         "src/sd_flash_app.c"
+        "src/rgb_light_app.c"
         "src/snake_app.c"
         "src/tetris_app.c"
         "src/breakout_app.c"
