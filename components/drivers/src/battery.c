@@ -85,7 +85,8 @@ static void battery_task(void *arg)
             if ((s_battery.sample_count++ % 10U) == 0U) {
                 ESP_LOGI(TAG, "adc_raw=%d pack=%umV filtered=%umV percent=%u%s",
                          raw, pack_mv, s_battery.status.millivolts, s_battery.status.percentage,
-                         pack_mv < 2500 ? " input_below_liion_range" : "");
+                         pack_mv > s_battery.config.full_mv + 300 ? " input_above_liion_range_check_divider" :
+                         (pack_mv < 2500 ? " input_below_liion_range" : ""));
             }
             publish_if_changed(&previous);
         } else {

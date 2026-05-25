@@ -17,12 +17,15 @@ static void draw_battery_icon(ui_t *ui, int x, int y, uint8_t percent, bool low)
 
 void ui_status_bar_render(ui_t *ui, const char *title)
 {
+    const int battery_x = 109;
+    const int percent_gap = 3;
     char pct[8];
     snprintf(pct, sizeof(pct), "%u%%", ui->battery_percent);
+    int pct_x = battery_x - percent_gap - ui_text_width(pct);
 
     ui_fill_rect(ui, 0, 0, UI_WIDTH, UI_STATUS_BAR_HEIGHT, false);
     ui_draw_text(ui, 0, 1, title != NULL ? title : "HANDHELD", true);
-    ui_draw_text(ui, 90, 1, pct, true);
-    draw_battery_icon(ui, 109, 1, ui->battery_percent, ui->battery_low);
+    ui_draw_text(ui, pct_x, 1, pct, true);
+    draw_battery_icon(ui, battery_x, 1, ui->battery_percent, ui->battery_low);
     ui_draw_hline(ui, 0, UI_STATUS_BAR_HEIGHT - 1, UI_WIDTH, true);
 }
