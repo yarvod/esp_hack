@@ -5,6 +5,7 @@
 #include "esp_err.h"
 
 #define SYSTEM_SETTING_SHOW_FPS "show_fps"
+#define SYSTEM_SETTING_LOW_POWER "low_power"
 
 esp_err_t system_settings_init(void);
 esp_err_t system_settings_get_u8(const char *key, uint8_t default_value, uint8_t *value);
