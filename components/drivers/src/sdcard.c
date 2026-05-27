@@ -14,6 +14,7 @@ static const char *TAG = "sdcard";
 
 #define SDCARD_POWERUP_DELAY_MS 500
 #define SDCARD_STARTUP_CLOCK_BYTES 16
+#define SDCARD_WIRE_TEST_ENABLED 1
 
 typedef struct {
     sdcard_config_t config;
@@ -27,6 +28,7 @@ typedef struct {
     uint8_t cmd8;
     uint8_t r7[4];
     int miso_idle;
+    uint8_t cmd0_attempts;
 } sdcard_probe_result_t;
 
 static sdcard_state_t s_sd;
@@ -84,13 +86,23 @@ static sdcard_probe_result_t probe_card_spi(const sdcard_config_t *config)
         probe_transfer_byte(config, 0xFF);
     }
 
-    sdcard_probe_result_t result = {0};
-    result.cmd0 = probe_command(config, 0, 0x00000000, 0x95, NULL, 0);
+    sdcard_probe_result_t result = {
+        .cmd0 = 0xFF,
+        .cmd8 = 0xFF,
+    };
+    for (uint8_t attempt = 1; attempt <= 5; ++attempt) {
+        result.cmd0_attempts = attempt;
+        result.cmd0 = probe_command(config, 0, 0x00000000, 0x95, NULL, 0);
+        if (result.cmd0 != 0xFF) {
+            break;
+        }
+        for (int i = 0; i < SDCARD_STARTUP_CLOCK_BYTES; ++i) {
+            probe_transfer_byte(config, 0xFF);
+        }
+        esp_rom_delay_us(20 * 1000);
+    }
     result.cmd8 = probe_command(config, 8, 0x000001AA, 0x87, result.r7, sizeof(result.r7));
     result.miso_idle = gpio_get_level(config->miso);
-    ESP_LOGI(TAG, "spi probe cmd0=0x%02x cmd8=0x%02x r7=%02x %02x %02x %02x miso_idle=%d",
-             result.cmd0, result.cmd8, result.r7[0], result.r7[1], result.r7[2], result.r7[3],
-             result.miso_idle);
     return result;
 }
 
@@ -133,7 +145,7 @@ static void configure_line_pullups(const sdcard_config_t *config)
 
 static void log_line_levels(const sdcard_config_t *config, const char *stage)
 {
-    ESP_LOGI(TAG, "%s levels cs=%d mosi=%d miso=%d clk=%d",
+    ESP_LOGW(TAG, "%s levels cs=%d mosi=%d miso=%d clk=%d",
              stage,
              gpio_get_level(config->cs),
              gpio_get_level(config->mosi),
@@ -153,10 +165,51 @@ static void log_miso_pull_probe(const sdcard_config_t *config)
     esp_rom_delay_us(200);
     int pullup = gpio_get_level(config->miso);
 
-    ESP_LOGI(TAG, "miso pull probe pulldown=%d pullup=%d", pulldown, pullup);
+    ESP_LOGW(TAG, "miso pull probe pulldown=%d pullup=%d", pulldown, pullup);
     if (pulldown == 0 && pullup == 1) {
         ESP_LOGW(TAG, "miso looks floating; check MISO wire/card/module or add external 10k pull-up");
     }
+}
+
+static void run_wire_test(const sdcard_config_t *config)
+{
+#if SDCARD_WIRE_TEST_ENABLED
+    ESP_LOGW(TAG, "wire test start: each output line toggles alone, 2 seconds per level");
+    ESP_LOGW(TAG, "measure on SD module pads with black probe on GND");
+    gpio_set_level(config->cs, 1);
+    gpio_set_level(config->mosi, 1);
+    gpio_set_level(config->clk, 0);
+    vTaskDelay(pdMS_TO_TICKS(1000));
+
+    const struct {
+        const char *name;
+        gpio_num_t gpio;
+        int idle_level;
+    } lines[] = {
+        {"CS", config->cs, 1},
+        {"MOSI", config->mosi, 1},
+        {"CLK", config->clk, 0},
+    };
+
+    for (size_t line = 0; line < sizeof(lines) / sizeof(lines[0]); ++line) {
+        ESP_LOGW(TAG, "wire test %s: LOW for 2s", lines[line].name);
+        gpio_set_level(lines[line].gpio, 0);
+        log_line_levels(config, "wire test readback low");
+        vTaskDelay(pdMS_TO_TICKS(2000));
+
+        ESP_LOGW(TAG, "wire test %s: HIGH for 2s", lines[line].name);
+        gpio_set_level(lines[line].gpio, 1);
+        log_line_levels(config, "wire test readback high");
+        vTaskDelay(pdMS_TO_TICKS(2000));
+
+        gpio_set_level(lines[line].gpio, lines[line].idle_level);
+        vTaskDelay(pdMS_TO_TICKS(500));
+    }
+    gpio_set_level(config->cs, 1);
+    gpio_set_level(config->mosi, 1);
+    gpio_set_level(config->clk, 0);
+    ESP_LOGW(TAG, "wire test done");
+#endif
 }
 
 esp_err_t sdcard_mount(const sdcard_config_t *config)
@@ -178,14 +231,20 @@ esp_err_t sdcard_mount(const sdcard_config_t *config)
     log_miso_pull_probe(&s_sd.config);
     configure_line_pullups(&s_sd.config);
     log_line_levels(&s_sd.config, "after pullups");
+    run_wire_test(&s_sd.config);
     esp_rom_delay_us(SDCARD_POWERUP_DELAY_MS * 1000);
 
-    ESP_LOGI(TAG, "mount start cs=%d mosi=%d miso=%d clk=%d freq=%luKHz",
+    ESP_LOGW(TAG, "mount start cs=%d mosi=%d miso=%d clk=%d freq=%luKHz",
              s_sd.config.cs, s_sd.config.mosi, s_sd.config.miso, s_sd.config.clk,
              (unsigned long)s_sd.config.max_freq_khz);
     sdcard_probe_result_t probe = probe_card_spi(&s_sd.config);
+    ESP_LOGW(TAG, "spi probe cmd0=0x%02x attempts=%u cmd8=0x%02x r7=%02x %02x %02x %02x miso_idle=%d",
+             probe.cmd0, probe.cmd0_attempts,
+             probe.cmd8, probe.r7[0], probe.r7[1], probe.r7[2], probe.r7[3],
+             probe.miso_idle);
     if (probe.cmd0 == 0xFF) {
         ESP_LOGW(TAG, "card did not answer CMD0; this is a physical/SPI wiring or module power-level issue, not FAT32");
+        log_line_levels(&s_sd.config, "after cmd0 timeout");
     }
     configure_line_pullups(&s_sd.config);
 

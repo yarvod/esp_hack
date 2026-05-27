@@ -5,6 +5,10 @@
 #define BOARD_PIN_OLED_SDA      GPIO_NUM_7
 #define BOARD_PIN_OLED_SCL      GPIO_NUM_6
 
+#define BOARD_PIN_NFC_SDA       BOARD_PIN_OLED_SDA
+#define BOARD_PIN_NFC_SCL       BOARD_PIN_OLED_SCL
+#define BOARD_NFC_I2C_PORT      0
+
 #define BOARD_PIN_RGB_LED       GPIO_NUM_8
 
 #define BOARD_PIN_JOY_X         GPIO_NUM_0

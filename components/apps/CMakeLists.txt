@@ -10,6 +10,8 @@ idf_component_register(
         "src/invaders_app.c"
         "src/sleep_app.c"
         "src/home_screen.c"
+        "src/keys_app.c"
+        "src/settings_app.c"
         "src/simple_app_screen.c"
         "src/wifi_app.c"
         "src/wifi_tools.c"

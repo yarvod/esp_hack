@@ -53,6 +53,22 @@ void ui_set_battery(ui_t *ui, uint8_t percent, bool low)
     }
 }
 
+void ui_set_show_fps(ui_t *ui, bool show)
+{
+    if (ui != NULL && ui->show_fps != show) {
+        ui->show_fps = show;
+        ui_mark_dirty(ui);
+    }
+}
+
+void ui_set_fps(ui_t *ui, uint16_t fps)
+{
+    if (ui != NULL && ui->fps != fps) {
+        ui->fps = fps;
+        ui_mark_dirty(ui);
+    }
+}
+
 void ui_draw_pixel(ui_t *ui, int x, int y, bool color)
 {
     if (ui == NULL || ui->display == NULL) {

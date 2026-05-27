@@ -1,6 +1,7 @@
 #include "drivers/ssd1306.h"
 
 #include <string.h>
+#include "drivers/i2c_bus.h"
 #include "esp_check.h"
 #include "esp_log.h"
 
@@ -9,14 +10,20 @@ static const char *TAG = "ssd1306";
 #define SSD1306_I2C_ADDR 0x3C
 #define SSD1306_CONTROL_CMD 0x00
 #define SSD1306_CONTROL_DATA 0x40
+#define SSD1306_I2C_CLOCK_HZ 600000
+#define SSD1306_I2C_CHUNK_SIZE 256
 
 static esp_err_t write_bytes(ssd1306_t *display, uint8_t control, const uint8_t *data, size_t len)
 {
-    uint8_t packet[17];
-    ESP_RETURN_ON_FALSE(len <= 16, ESP_ERR_INVALID_SIZE, TAG, "packet too large");
+    uint8_t packet[SSD1306_I2C_CHUNK_SIZE + 1];
+    ESP_RETURN_ON_FALSE(len <= SSD1306_I2C_CHUNK_SIZE, ESP_ERR_INVALID_SIZE, TAG, "packet too large");
     packet[0] = control;
     memcpy(&packet[1], data, len);
-    return i2c_master_transmit(display->device, packet, len + 1, 100);
+    esp_err_t err = i2c_master_transmit(display->device, packet, len + 1, 100);
+    if (err != ESP_OK) {
+        err = i2c_master_transmit(display->device, packet, len + 1, 100);
+    }
+    return err;
 }
 
 static esp_err_t command(ssd1306_t *display, uint8_t cmd)
@@ -32,17 +39,9 @@ esp_err_t ssd1306_init(ssd1306_t *display, int i2c_port, gpio_num_t sda, gpio_nu
     display->sda = sda;
     display->scl = scl;
     display->address = SSD1306_I2C_ADDR;
-    display->clock_hz = 400000;
+    display->clock_hz = SSD1306_I2C_CLOCK_HZ;
 
-    i2c_master_bus_config_t bus_config = {
-        .i2c_port = i2c_port,
-        .sda_io_num = sda,
-        .scl_io_num = scl,
-        .clk_source = I2C_CLK_SRC_DEFAULT,
-        .glitch_ignore_cnt = 7,
-        .flags.enable_internal_pullup = true,
-    };
-    ESP_RETURN_ON_ERROR(i2c_new_master_bus(&bus_config, &display->bus), TAG, "i2c bus init failed");
+    ESP_RETURN_ON_ERROR(i2c_bus_get_master(i2c_port, sda, scl, &display->bus), TAG, "i2c bus init failed");
 
     i2c_device_config_t dev_config = {
         .dev_addr_length = I2C_ADDR_BIT_LEN_7,
@@ -85,8 +84,9 @@ esp_err_t ssd1306_flush(ssd1306_t *display)
     ESP_RETURN_ON_ERROR(command(display, 0), TAG, "set page start failed");
     ESP_RETURN_ON_ERROR(command(display, 7), TAG, "set page end failed");
 
-    for (size_t offset = 0; offset < SSD1306_BUFFER_SIZE; offset += 16) {
-        ESP_RETURN_ON_ERROR(write_bytes(display, SSD1306_CONTROL_DATA, &display->buffer[offset], 16), TAG, "data write failed");
+    for (size_t offset = 0; offset < SSD1306_BUFFER_SIZE; offset += SSD1306_I2C_CHUNK_SIZE) {
+        ESP_RETURN_ON_ERROR(write_bytes(display, SSD1306_CONTROL_DATA, &display->buffer[offset], SSD1306_I2C_CHUNK_SIZE),
+                            TAG, "data write failed");
     }
     return ESP_OK;
 }

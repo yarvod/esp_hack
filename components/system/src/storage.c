@@ -2,10 +2,11 @@
 
 #include "drivers/board_pins.h"
 #include "drivers/sdcard.h"
+#include "system/key_store.h"
 
 esp_err_t storage_init(void)
 {
-    return ESP_OK;
+    return key_store_init();
 }
 
 esp_err_t storage_mount_sd(void)

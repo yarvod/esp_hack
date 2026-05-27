@@ -27,6 +27,11 @@ void core_screen_manager_render(core_context_t *ctx)
         return;
     }
 
+    if (ctx->show_fps) {
+        ctx->nav.dirty = true;
+        screen->dirty = true;
+    }
+
     if (!ctx->nav.dirty && !screen->dirty && !ctx->ui->dirty) {
         return;
     }
@@ -38,6 +43,7 @@ void core_screen_manager_render(core_context_t *ctx)
         ui_status_bar_render(ctx->ui, screen->title);
     }
     ui_present(ctx->ui);
+    ctx->fps_frame_count++;
     ctx->nav.dirty = false;
     screen->dirty = false;
 }

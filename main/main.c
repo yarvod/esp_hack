@@ -38,7 +38,6 @@
 #endif
 
 static const char *TAG = "handheld";
-
 static core_context_t s_core;
 static ssd1306_t s_display;
 static ui_t s_ui;
@@ -99,12 +98,16 @@ static esp_err_t init_hardware(void)
 {
     bool rgb_enabled = true;
     uint8_t rgb_mode = RGB_LED_MODE_RAINBOW;
+    bool show_fps = false;
     (void)system_settings_get_bool(RGB_LED_SETTING_ENABLED, true, &rgb_enabled);
     (void)system_settings_get_u8(RGB_LED_SETTING_MODE, RGB_LED_MODE_RAINBOW, &rgb_mode);
+    (void)system_settings_get_bool(SYSTEM_SETTING_SHOW_FPS, false, &show_fps);
 
     ESP_RETURN_ON_ERROR(analog_init(), TAG, "analog init failed");
     ESP_RETURN_ON_ERROR(ssd1306_init(&s_display, 0, BOARD_PIN_OLED_SDA, BOARD_PIN_OLED_SCL), TAG, "display init failed");
     ESP_RETURN_ON_ERROR(ui_init(&s_ui, &s_display), TAG, "ui init failed");
+    s_core.show_fps = show_fps;
+    ui_set_show_fps(&s_ui, show_fps);
 
     battery_config_t battery_cfg = {
         .adc_gpio = BOARD_PIN_BATTERY_ADC,
@@ -209,5 +212,13 @@ void app_main(void)
 
         core_screen_manager_update(&s_core, dt_ms);
         core_screen_manager_render(&s_core);
+        s_core.fps_elapsed_ms += dt_ms;
+        if (s_core.fps_elapsed_ms >= 1000) {
+            uint16_t fps = (uint16_t)((s_core.fps_frame_count * 1000U + s_core.fps_elapsed_ms / 2U) /
+                                      s_core.fps_elapsed_ms);
+            s_core.fps_frame_count = 0;
+            s_core.fps_elapsed_ms = 0;
+            ui_set_fps(&s_ui, fps);
+        }
     }
 }

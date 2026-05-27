@@ -2,7 +2,9 @@ idf_component_register(
     SRCS
         "src/analog.c"
         "src/battery.c"
+        "src/i2c_bus.c"
         "src/joystick.c"
+        "src/pn532.c"
         "src/rgb_led.c"
         "src/sdcard.c"
         "src/ssd1306.c"

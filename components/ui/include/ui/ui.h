@@ -15,6 +15,8 @@ typedef struct ui {
     bool dirty;
     uint8_t battery_percent;
     bool battery_low;
+    bool show_fps;
+    uint16_t fps;
 } ui_t;
 
 typedef enum {
@@ -28,6 +30,8 @@ void ui_begin(ui_t *ui);
 esp_err_t ui_present(ui_t *ui);
 void ui_mark_dirty(ui_t *ui);
 void ui_set_battery(ui_t *ui, uint8_t percent, bool low);
+void ui_set_show_fps(ui_t *ui, bool show);
+void ui_set_fps(ui_t *ui, uint16_t fps);
 
 void ui_draw_pixel(ui_t *ui, int x, int y, bool color);
 void ui_draw_hline(ui_t *ui, int x, int y, int w, bool color);

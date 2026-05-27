@@ -16,6 +16,9 @@ typedef struct core_context {
     uint8_t battery_percent;
     uint16_t battery_mv;
     bool battery_low;
+    bool show_fps;
+    uint32_t fps_frame_count;
+    uint32_t fps_elapsed_ms;
 } core_context_t;
 
 void core_context_init(core_context_t *ctx, ui_t *ui);

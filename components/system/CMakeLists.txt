@@ -1,6 +1,7 @@
 idf_component_register(
     SRCS
         "src/logger.c"
+        "src/key_store.c"
         "src/power_manager.c"
         "src/settings.c"
         "src/storage.c"
