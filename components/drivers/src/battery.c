@@ -9,6 +9,9 @@
 
 static const char *TAG = "battery";
 
+#define BATTERY_FILTER_ALPHA 0.03f
+#define BATTERY_LOG_EVERY_SAMPLES 30U
+
 typedef struct {
     battery_config_t config;
     battery_status_t status;
@@ -75,14 +78,14 @@ static void battery_task(void *arg)
         int raw = 0;
         battery_status_t previous = s_battery.status;
         if (sample_battery(&pack_mv, &raw) == ESP_OK) {
-            filtered_mv = filtered_mv * 0.85f + (float)pack_mv * 0.15f;
+            filtered_mv = filtered_mv * (1.0f - BATTERY_FILTER_ALPHA) + (float)pack_mv * BATTERY_FILTER_ALPHA;
 
             s_battery.status.millivolts = (uint16_t)filtered_mv;
             s_battery.status.percentage = percent_from_mv(s_battery.status.millivolts,
                                                           s_battery.config.empty_mv,
                                                           s_battery.config.full_mv);
             s_battery.status.low = s_battery.status.percentage <= s_battery.config.low_threshold_percent;
-            if ((s_battery.sample_count++ % 10U) == 0U) {
+            if ((s_battery.sample_count++ % BATTERY_LOG_EVERY_SAMPLES) == 0U) {
                 ESP_LOGI(TAG, "adc_raw=%d pack=%umV filtered=%umV percent=%u%s",
                          raw, pack_mv, s_battery.status.millivolts, s_battery.status.percentage,
                          pack_mv > s_battery.config.full_mv + 300 ? " input_above_liion_range_check_divider" :
