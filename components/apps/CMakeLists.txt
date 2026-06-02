@@ -2,7 +2,6 @@ idf_component_register(
     SRCS
         "src/apps_registry.c"
         "src/boot_screen.c"
-        "src/sd_flash_app.c"
         "src/rgb_light_app.c"
         "src/snake_app.c"
         "src/tetris_app.c"
@@ -17,5 +16,5 @@ idf_component_register(
         "src/wifi_tools.c"
         "src/bluetooth_app.c"
     INCLUDE_DIRS "include"
-    REQUIRES core ui system drivers nvs_flash esp_wifi esp_event bt esp_http_server json
+    REQUIRES core ui system drivers nvs_flash esp_wifi esp_event bt esp_http_server json jef-sure__pn532
 )

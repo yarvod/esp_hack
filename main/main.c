@@ -10,6 +10,7 @@
 #include "drivers/joystick.h"
 #include "drivers/rgb_led.h"
 #include "drivers/ssd1306.h"
+#include "driver/gpio.h"
 #include "esp_check.h"
 #include "esp_log.h"
 #include "esp_timer.h"
@@ -106,12 +107,30 @@ static esp_err_t init_hardware(void)
     (void)system_settings_get_bool(SYSTEM_SETTING_LOW_POWER, false, &low_power);
 
     ESP_RETURN_ON_ERROR(analog_init(), TAG, "analog init failed");
-    ESP_RETURN_ON_ERROR(ssd1306_init(&s_display, 0, BOARD_PIN_OLED_SDA, BOARD_PIN_OLED_SCL), TAG, "display init failed");
-    ESP_RETURN_ON_ERROR(ui_init(&s_ui, &s_display), TAG, "ui init failed");
+    // Keep the PN532 deselected until the Keys app initializes the SPI bus.
+    gpio_config_t io_conf = {
+        .pin_bit_mask = 1ULL << BOARD_PIN_NFC_SPI_CS,
+        .mode = GPIO_MODE_OUTPUT,
+        .pull_up_en = GPIO_PULLUP_ENABLE,
+        .pull_down_en = GPIO_PULLDOWN_DISABLE,
+        .intr_type = GPIO_INTR_DISABLE,
+    };
+    gpio_config(&io_conf);
+    gpio_set_level(BOARD_PIN_NFC_SPI_CS, 1);
+
+    vTaskDelay(pdMS_TO_TICKS(50));
+
+    esp_err_t display_err = ssd1306_init(&s_display, 0, BOARD_PIN_OLED_SDA, BOARD_PIN_OLED_SCL);
+    if (display_err != ESP_OK) {
+        ESP_LOGE(TAG, "display init failed: %s", esp_err_to_name(display_err));
+        s_core.ui = NULL;
+    } else {
+        ESP_RETURN_ON_ERROR(ui_init(&s_ui, &s_display), TAG, "ui init failed");
+        ui_set_show_fps(&s_ui, show_fps);
+    }
     s_core.show_fps = show_fps;
     s_core.low_power_mode = low_power;
     s_core.render_elapsed_ms = low_power ? 50 : 0;
-    ui_set_show_fps(&s_ui, show_fps);
 
     battery_config_t battery_cfg = {
         .adc_gpio = BOARD_PIN_BATTERY_ADC,
@@ -189,12 +208,7 @@ void app_main(void)
     core_context_init(&s_core, &s_ui);
     ESP_ERROR_CHECK(core_event_bus_init(&s_core.events, 24));
     ESP_ERROR_CHECK(init_hardware());
-#if CONFIG_HANDHELD_SD_MOUNT_ON_BOOT
-    esp_err_t sd_err = storage_mount_sd();
-    if (sd_err != ESP_OK) {
-        ESP_LOGW(TAG, "SD mount on boot failed: %s", esp_err_to_name(sd_err));
-    }
-#endif
+
     ESP_ERROR_CHECK(apps_register_all(&s_core));
     ESP_ERROR_CHECK(apps_show_boot(&s_core));
     ESP_ERROR_CHECK(battery_start());

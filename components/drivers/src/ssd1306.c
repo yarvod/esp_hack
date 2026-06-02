@@ -10,7 +10,7 @@ static const char *TAG = "ssd1306";
 #define SSD1306_I2C_ADDR 0x3C
 #define SSD1306_CONTROL_CMD 0x00
 #define SSD1306_CONTROL_DATA 0x40
-#define SSD1306_I2C_CLOCK_HZ 600000
+#define SSD1306_I2C_CLOCK_HZ 400000
 #define SSD1306_I2C_CHUNK_SIZE 256
 
 static esp_err_t write_bytes(ssd1306_t *display, uint8_t control, const uint8_t *data, size_t len)

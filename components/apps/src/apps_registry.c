@@ -6,7 +6,6 @@ extern const core_app_descriptor_t g_wifi_app;
 extern const core_app_descriptor_t g_settings_app;
 extern const core_app_descriptor_t g_bluetooth_app;
 extern const core_app_descriptor_t g_rgb_light_app;
-extern const core_app_descriptor_t g_sd_flash_app;
 extern const core_app_descriptor_t g_keys_app;
 extern const core_app_descriptor_t g_snake_app;
 extern const core_app_descriptor_t g_tetris_app;
@@ -29,10 +28,6 @@ esp_err_t apps_register_all(core_context_t *ctx)
         return err;
     }
     err = core_app_manager_register(&ctx->apps, &g_rgb_light_app);
-    if (err != ESP_OK) {
-        return err;
-    }
-    err = core_app_manager_register(&ctx->apps, &g_sd_flash_app);
     if (err != ESP_OK) {
         return err;
     }

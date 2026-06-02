@@ -1,20 +1,24 @@
 #include "core/app_manager.h"
 #include "core/context.h"
 
+#include <stdlib.h>
 #include <stdio.h>
 #include <string.h>
 #include "drivers/board_pins.h"
-#include "drivers/pn532.h"
 #include "esp_err.h"
+#include "esp_log.h"
+#include "pn532.h"
 #include "system/key_store.h"
 #include "ui/status_bar.h"
 #include "ui/widgets.h"
 
+static const char *TAG = "keys_app";
+
 typedef enum {
     KEYS_VIEW_LIST = 0,
     KEYS_VIEW_ACTIONS,
-    KEYS_VIEW_SCAN_NEW,
-    KEYS_VIEW_SCAN_REWRITE,
+    KEYS_VIEW_SCAN,
+    KEYS_VIEW_EMULATE,
     KEYS_VIEW_RENAME,
     KEYS_VIEW_DETAILS,
     KEYS_VIEW_MESSAGE,
@@ -29,23 +33,28 @@ typedef struct {
     size_t active_index;
     keys_view_t view;
     keys_view_t message_return;
+    keys_view_t scan_return;
     char message_title[18];
     char message_body[32];
     char rename_name[KEY_STORE_NAME_LEN];
     size_t rename_cursor;
     uint32_t scan_elapsed_ms;
+    bool is_scanning;
+    bool is_emulating;
 } keys_app_state_t;
 
 static keys_app_state_t s_keys;
-static pn532_t s_pn532;
+static pn532_t *s_pn532;
 static bool s_pn532_ready;
+
+#define PN532_SPI_CLOCK_HZ 100000
 
 static const char *ACTIONS[] = {
     "Emulate",
     "Rename",
     "Rewrite",
-    "Delete",
     "Details",
+    "Delete",
 };
 
 static const char RENAME_CHARS[] = " ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789-_";
@@ -69,6 +78,9 @@ static void reload_keys(keys_app_state_t *state)
     if (state->selected > state->count) {
         state->selected = state->count;
     }
+    if (state->active_index >= state->count && state->active_index != (size_t)-1) {
+        state->active_index = state->count == 0 ? (size_t)-1 : state->count - 1;
+    }
 }
 
 static esp_err_t ensure_pn532(void)
@@ -76,59 +88,94 @@ static esp_err_t ensure_pn532(void)
     if (s_pn532_ready) {
         return ESP_OK;
     }
-    esp_err_t err = pn532_init_i2c(&s_pn532, BOARD_NFC_I2C_PORT, BOARD_PIN_NFC_SDA, BOARD_PIN_NFC_SCL);
-    if (err == ESP_OK) {
-        s_pn532_ready = true;
+
+    ESP_LOGI(TAG, "PN532 SPI init host=%d sck=%d miso=%d mosi=%d cs=%d clock=%dHz",
+             SPI2_HOST, BOARD_PIN_NFC_SPI_SCK, BOARD_PIN_NFC_SPI_MISO,
+             BOARD_PIN_NFC_SPI_MOSI, BOARD_PIN_NFC_SPI_CS, PN532_SPI_CLOCK_HZ);
+    pn532_bus_t *bus = pn532_spi_init(SPI2_HOST, BOARD_PIN_NFC_SPI_SCK, BOARD_PIN_NFC_SPI_MISO,
+                                      BOARD_PIN_NFC_SPI_MOSI, BOARD_PIN_NFC_SPI_CS, PN532_SPI_CLOCK_HZ);
+    if (bus == NULL) {
+        ESP_LOGW(TAG, "pn532 spi bus init failed");
+        return ESP_FAIL;
     }
-    return err;
+
+    s_pn532 = pn532_init(bus, GPIO_NUM_NC, GPIO_NUM_NC);
+    if (s_pn532 == NULL) {
+        pn532_bus_destroy(bus);
+        ESP_LOGW(TAG, "pn532 init failed");
+        return ESP_FAIL;
+    }
+
+    uint32_t firmware = pn532_get_firmware_version(s_pn532);
+    if (firmware == 0) {
+        pn532_deinit(s_pn532, true);
+        s_pn532 = NULL;
+        ESP_LOGW(TAG, "pn532 firmware read failed");
+        return ESP_FAIL;
+    }
+
+    ESP_LOGI(TAG, "PN532 firmware=0x%08lx", (unsigned long)firmware);
+    s_pn532_ready = true;
+    return ESP_OK;
 }
 
-static void begin_scan(core_context_t *ctx, keys_app_state_t *state, keys_view_t scan_view)
+static void begin_scan(core_context_t *ctx, keys_app_state_t *state, size_t active_index, keys_view_t return_view)
 {
     esp_err_t err = ensure_pn532();
     if (err != ESP_OK) {
-        set_message(state, "NFC ERROR", "PN532 not found", KEYS_VIEW_LIST);
+        set_message(state, "NFC ERROR", esp_err_to_name(err), return_view);
         core_nav_mark_dirty(&ctx->nav);
         return;
     }
+
+    state->active_index = active_index;
+    state->scan_return = return_view;
     state->scan_elapsed_ms = 250;
-    state->view = scan_view;
+    state->is_scanning = true;
+    state->view = KEYS_VIEW_SCAN;
     core_nav_mark_dirty(&ctx->nav);
 }
 
-static void default_key_name(keys_app_state_t *state, char *out, size_t out_size)
-{
-    snprintf(out, out_size, "KEY %02u", (unsigned)(state->count + 1));
-}
-
-static void fill_record_from_target(key_store_record_t *record, const pn532_target_t *target, const char *name)
+static void fill_record_from_uid(key_store_record_t *record, const pn532_uid_t *uid, const char *name)
 {
     memset(record, 0, sizeof(*record));
     snprintf(record->name, sizeof(record->name), "%s", name);
     record->type = KEY_STORE_TYPE_ISO14443A_UID;
-    record->uid_len = target->uid_len;
-    memcpy(record->uid, target->uid, target->uid_len);
-    record->atqa = target->atqa;
-    record->sak = target->sak;
+    size_t uid_len = 0;
+    if (uid != NULL && uid->uid_length > 0) {
+        uid_len = (size_t)uid->uid_length;
+    }
+    if (uid_len > KEY_STORE_UID_MAX_LEN) {
+        uid_len = KEY_STORE_UID_MAX_LEN;
+    }
+    record->uid_len = (uint8_t)uid_len;
+    if (uid_len > 0) {
+        memcpy(record->uid, uid->uid, uid_len);
+    }
+    record->atqa = uid != NULL ? uid->atqa : 0;
+    record->sak = uid != NULL ? uid->sak : 0;
 }
 
-static void handle_scanned_target(core_context_t *ctx, keys_app_state_t *state, const pn532_target_t *target)
+static void handle_scanned_uid(core_context_t *ctx, keys_app_state_t *state, const pn532_uid_t *uid)
 {
-    if (state->view == KEYS_VIEW_SCAN_NEW) {
+    state->is_scanning = false;
+
+    if (state->active_index == (size_t)-1) {
         char name[KEY_STORE_NAME_LEN];
-        default_key_name(state, name, sizeof(name));
+        snprintf(name, sizeof(name), "KEY %02u", (unsigned)(state->count + 1));
+
         key_store_record_t record;
-        fill_record_from_target(&record, target, name);
+        fill_record_from_uid(&record, uid, name);
         esp_err_t err = key_store_add(&record);
         reload_keys(state);
         set_message(state, err == ESP_OK ? "SAVED" : "SAVE ERROR",
                     err == ESP_OK ? "UID saved to flash" : esp_err_to_name(err), KEYS_VIEW_LIST);
-    } else if (state->view == KEYS_VIEW_SCAN_REWRITE && state->active_index < state->count) {
+    } else if (state->active_index < state->count) {
         key_store_record_t record = state->records[state->active_index];
-        record.uid_len = target->uid_len;
-        memcpy(record.uid, target->uid, target->uid_len);
-        record.atqa = target->atqa;
-        record.sak = target->sak;
+        char name[KEY_STORE_NAME_LEN];
+        snprintf(name, sizeof(name), "%s", record.name);
+        fill_record_from_uid(&record, uid, name);
+
         esp_err_t err = key_store_update(state->active_index, &record);
         reload_keys(state);
         set_message(state, err == ESP_OK ? "UPDATED" : "WRITE ERROR",
@@ -181,6 +228,7 @@ static void format_uid_tail(const key_store_record_t *record, char *out, size_t 
     if (record == NULL || record->uid_len == 0) {
         return;
     }
+
     uint8_t start = record->uid_len > 4 ? record->uid_len - 4 : 0;
     size_t used = 0;
     for (uint8_t i = start; i < record->uid_len; ++i) {
@@ -208,16 +256,7 @@ static void emulate_active(core_context_t *ctx, keys_app_state_t *state)
     if (state->active_index >= state->count) {
         return;
     }
-    esp_err_t init_err = ensure_pn532();
-    if (init_err != ESP_OK) {
-        set_message(state, "NFC ERROR", "PN532 not found", KEYS_VIEW_ACTIONS);
-        core_nav_mark_dirty(&ctx->nav);
-        return;
-    }
-
-    key_store_record_t *record = &state->records[state->active_index];
-    esp_err_t err = pn532_emulate_uid(&s_pn532, record->uid, record->uid_len);
-    set_message(state, "EMULATE", err == ESP_OK ? "Emulation started" : "PN532 mode unsupported", KEYS_VIEW_ACTIONS);
+    set_message(state, "EMULATE", "Not supported yet", KEYS_VIEW_ACTIONS);
     core_nav_mark_dirty(&ctx->nav);
 }
 
@@ -244,7 +283,7 @@ static bool keys_on_input(core_context_t *ctx, core_screen_t *screen, const core
             return true;
         case CORE_INPUT_SELECT:
             if (state->selected == 0) {
-                begin_scan(ctx, state, KEYS_VIEW_SCAN_NEW);
+                begin_scan(ctx, state, (size_t)-1, KEYS_VIEW_LIST);
             } else {
                 state->active_index = state->selected - 1;
                 state->action_selected = 0;
@@ -276,21 +315,21 @@ static bool keys_on_input(core_context_t *ctx, core_screen_t *screen, const core
             if (state->action_selected == 0) {
                 emulate_active(ctx, state);
             } else if (state->action_selected == 1 && state->active_index < state->count) {
-                snprintf(state->rename_name, sizeof(state->rename_name), "%s", state->records[state->active_index].name);
+                snprintf(state->rename_name, sizeof(state->rename_name), "%s",
+                         state->records[state->active_index].name);
                 state->rename_cursor = 0;
                 state->view = KEYS_VIEW_RENAME;
                 core_nav_mark_dirty(&ctx->nav);
             } else if (state->action_selected == 2) {
-                begin_scan(ctx, state, KEYS_VIEW_SCAN_REWRITE);
+                begin_scan(ctx, state, state->active_index, KEYS_VIEW_ACTIONS);
             } else if (state->action_selected == 3) {
-                esp_err_t err = key_store_delete(state->active_index);
-                reload_keys(state);
-                state->view = KEYS_VIEW_LIST;
-                set_message(state, err == ESP_OK ? "DELETED" : "DEL ERROR",
-                            err == ESP_OK ? "Record removed" : esp_err_to_name(err), KEYS_VIEW_LIST);
-            } else if (state->action_selected == 4) {
                 state->view = KEYS_VIEW_DETAILS;
                 core_nav_mark_dirty(&ctx->nav);
+            } else if (state->action_selected == 4) {
+                esp_err_t err = key_store_delete(state->active_index);
+                reload_keys(state);
+                set_message(state, err == ESP_OK ? "DELETED" : "DEL ERROR",
+                            err == ESP_OK ? "Record removed" : esp_err_to_name(err), KEYS_VIEW_LIST);
             }
             return true;
         default:
@@ -328,9 +367,20 @@ static bool keys_on_input(core_context_t *ctx, core_screen_t *screen, const core
         }
     }
 
-    if (state->view == KEYS_VIEW_SCAN_NEW || state->view == KEYS_VIEW_SCAN_REWRITE) {
+    if (state->view == KEYS_VIEW_SCAN) {
         if (event->action == CORE_INPUT_BACK) {
-            state->view = state->view == KEYS_VIEW_SCAN_NEW ? KEYS_VIEW_LIST : KEYS_VIEW_ACTIONS;
+            state->is_scanning = false;
+            state->view = state->scan_return;
+            core_nav_mark_dirty(&ctx->nav);
+            return true;
+        }
+        return false;
+    }
+
+    if (state->view == KEYS_VIEW_EMULATE) {
+        if (event->action == CORE_INPUT_BACK || event->action == CORE_INPUT_SELECT) {
+            state->is_emulating = false;
+            state->view = KEYS_VIEW_ACTIONS;
             core_nav_mark_dirty(&ctx->nav);
             return true;
         }
@@ -361,19 +411,22 @@ static bool keys_on_input(core_context_t *ctx, core_screen_t *screen, const core
 static void keys_on_update(core_context_t *ctx, core_screen_t *screen, uint32_t dt_ms)
 {
     keys_app_state_t *state = (keys_app_state_t *)screen->user_data;
-    if (state->view != KEYS_VIEW_SCAN_NEW && state->view != KEYS_VIEW_SCAN_REWRITE) {
+    if (state->view != KEYS_VIEW_SCAN || !state->is_scanning) {
         return;
     }
+
     state->scan_elapsed_ms += dt_ms;
     if (state->scan_elapsed_ms < 250) {
         return;
     }
     state->scan_elapsed_ms = 0;
 
-    pn532_target_t target;
-    esp_err_t err = pn532_read_passive_target(&s_pn532, &target, 120);
-    if (err == ESP_OK) {
-        handle_scanned_target(ctx, state, &target);
+    pn532_uids_array_t *uids = pn532_14443_get_all_uids(s_pn532);
+    if (uids != NULL && uids->uids_count > 0) {
+        handle_scanned_uid(ctx, state, &uids->uids[0]);
+        free(uids);
+    } else {
+        free(uids);
     }
 }
 
@@ -427,10 +480,24 @@ static void draw_actions(keys_app_state_t *state, ui_t *ui)
 
 static void draw_scan(keys_app_state_t *state, ui_t *ui)
 {
-    ui_status_bar_render(ui, state->view == KEYS_VIEW_SCAN_NEW ? "NEW KEY" : "REWRITE");
+    ui_status_bar_render(ui, state->active_index == (size_t)-1 ? "NEW KEY" : "REWRITE");
     ui_draw_text_aligned(ui, 0, 24, UI_WIDTH, "Hold tag near", UI_ALIGN_CENTER, true);
     ui_draw_text_aligned(ui, 0, 36, UI_WIDTH, "PN532 antenna", UI_ALIGN_CENTER, true);
     ui_draw_text_aligned(ui, 0, 55, UI_WIDTH, "BACK: cancel", UI_ALIGN_CENTER, true);
+}
+
+static void draw_emulate(keys_app_state_t *state, ui_t *ui)
+{
+    ui_status_bar_render(ui, "EMULATE");
+    if (state->active_index >= state->count) {
+        ui_widget_empty_state(ui, "NO KEY", "BACK");
+        return;
+    }
+    char uid[32];
+    format_uid_hex(&state->records[state->active_index], uid, sizeof(uid));
+    ui_draw_text_aligned(ui, 0, 18, UI_WIDTH, state->records[state->active_index].name, UI_ALIGN_CENTER, true);
+    ui_draw_text_aligned(ui, 0, 32, UI_WIDTH, uid, UI_ALIGN_CENTER, true);
+    ui_draw_text_aligned(ui, 0, 55, UI_WIDTH, "BACK: stop", UI_ALIGN_CENTER, true);
 }
 
 static void draw_rename(keys_app_state_t *state, ui_t *ui)
@@ -480,9 +547,11 @@ static void keys_on_render(core_context_t *ctx, core_screen_t *screen, ui_t *ui)
     case KEYS_VIEW_ACTIONS:
         draw_actions(state, ui);
         break;
-    case KEYS_VIEW_SCAN_NEW:
-    case KEYS_VIEW_SCAN_REWRITE:
+    case KEYS_VIEW_SCAN:
         draw_scan(state, ui);
+        break;
+    case KEYS_VIEW_EMULATE:
+        draw_emulate(state, ui);
         break;
     case KEYS_VIEW_RENAME:
         draw_rename(state, ui);
@@ -500,6 +569,7 @@ static void keys_on_render(core_context_t *ctx, core_screen_t *screen, ui_t *ui)
 static esp_err_t keys_launch(core_context_t *ctx)
 {
     memset(&s_keys, 0, sizeof(s_keys));
+    s_keys.active_index = (size_t)-1;
     reload_keys(&s_keys);
     s_keys.screen.id = "keys.screen";
     s_keys.screen.title = "KEYS";
