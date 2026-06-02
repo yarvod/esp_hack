@@ -210,7 +210,14 @@ static void emulate_active(core_context_t *ctx, keys_app_state_t *state)
     }
     const key_store_record_t *record = &state->records[state->active_index];
     esp_err_t err = nfc_emulate_uid(record->uid, record->uid_len);
-    set_message(state, "EMULATE", err == ESP_OK ? "Started" : esp_err_to_name(err), KEYS_VIEW_ACTIONS);
+    if (err == ESP_OK) {
+        state->is_emulating = true;
+        state->view = KEYS_VIEW_EMULATE;
+    } else if (err == ESP_ERR_TIMEOUT) {
+        set_message(state, "NO READER", "Try near reader", KEYS_VIEW_ACTIONS);
+    } else {
+        set_message(state, "EMU ERROR", esp_err_to_name(err), KEYS_VIEW_ACTIONS);
+    }
     core_nav_mark_dirty(&ctx->nav);
 }
 
@@ -333,6 +340,7 @@ static bool keys_on_input(core_context_t *ctx, core_screen_t *screen, const core
 
     if (state->view == KEYS_VIEW_EMULATE) {
         if (event->action == CORE_INPUT_BACK || event->action == CORE_INPUT_SELECT) {
+            nfc_emulation_stop();
             state->is_emulating = false;
             state->view = KEYS_VIEW_ACTIONS;
             core_nav_mark_dirty(&ctx->nav);
@@ -452,7 +460,8 @@ static void draw_emulate(keys_app_state_t *state, ui_t *ui)
     char uid[32];
     format_uid_hex(&state->records[state->active_index], uid, sizeof(uid));
     ui_draw_text_aligned(ui, 0, 18, UI_WIDTH, state->records[state->active_index].name, UI_ALIGN_CENTER, true);
-    ui_draw_text_aligned(ui, 0, 32, UI_WIDTH, uid, UI_ALIGN_CENTER, true);
+    ui_draw_text_aligned(ui, 0, 30, UI_WIDTH, uid, UI_ALIGN_CENTER, true);
+    ui_draw_text_aligned(ui, 0, 42, UI_WIDTH, nfc_emulation_is_active() ? "Target mode" : "Stopped", UI_ALIGN_CENTER, true);
     ui_draw_text_aligned(ui, 0, 55, UI_WIDTH, "BACK: stop", UI_ALIGN_CENTER, true);
 }
 

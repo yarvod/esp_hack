@@ -4,14 +4,28 @@
 #include <string.h>
 #include "drivers/board_pins.h"
 #include "esp_log.h"
+#include "freertos/FreeRTOS.h"
+#include "freertos/task.h"
 #include "pn532.h"
 
 static const char *TAG = "nfc";
 
 #define NFC_SPI_CLOCK_HZ 100000
+#define NFC_EMULATE_TIMEOUT_MS 3000
+#define NFC_EMULATE_TASK_STACK  4096
+#define NFC_EMULATE_TASK_PRIO   5
+
+#define PN532_COMMAND_TGINITASTARGET 0x8C
+#define PN532_COMMAND_TGGETDATA      0x86
+#define PN532_COMMAND_TGSETDATA      0x8E
 
 static pn532_t *s_pn532;
 static bool s_ready;
+static bool s_emulating;
+static volatile bool s_emulation_stop_requested;
+static TaskHandle_t s_emulation_task;
+static uint8_t s_emulation_uid[NFC_UID_MAX_LEN];
+static size_t s_emulation_uid_len;
 
 static nfc_tag_subtype_t map_subtype(pn532_nfc_type_t subtype)
 {
@@ -106,11 +120,17 @@ esp_err_t nfc_init(void)
 
 void nfc_deinit(void)
 {
+    nfc_emulation_stop();
+    for (int i = 0; s_emulation_task != NULL && i < 40; ++i) {
+        vTaskDelay(pdMS_TO_TICKS(100));
+    }
+
     if (s_pn532 != NULL) {
         pn532_deinit(s_pn532, true);
     }
     s_pn532 = NULL;
     s_ready = false;
+    s_emulating = false;
 }
 
 bool nfc_is_ready(void)
@@ -135,6 +155,9 @@ esp_err_t nfc_scan(nfc_tag_t *tag)
 {
     if (tag == NULL) {
         return ESP_ERR_INVALID_ARG;
+    }
+    if (s_emulation_task != NULL) {
+        return ESP_ERR_INVALID_STATE;
     }
     esp_err_t err = nfc_init();
     if (err != ESP_OK) {
@@ -164,11 +187,142 @@ esp_err_t nfc_scan(nfc_tag_t *tag)
     return ESP_OK;
 }
 
+static bool nfc_target_reply_once(void)
+{
+    uint8_t rx[80];
+    size_t rx_len = sizeof(rx);
+    if (!pn532_execute_command(s_pn532, PN532_COMMAND_TGGETDATA, NULL, 0, rx, &rx_len, 250)) {
+        return false;
+    }
+    if (rx_len == 0 || rx[0] != 0x00) {
+        return false;
+    }
+
+    ESP_LOGI(TAG, "target received %u byte(s)", (unsigned)(rx_len - 1));
+
+    const uint8_t file_not_found[] = {0x6A, 0x82};
+    uint8_t response[4];
+    size_t response_len = sizeof(response);
+    return pn532_execute_command(s_pn532, PN532_COMMAND_TGSETDATA, file_not_found, sizeof(file_not_found),
+                                 response, &response_len, 250);
+}
+
+static esp_err_t nfc_emulate_uid_once(const uint8_t *uid, size_t uid_len)
+{
+    uint8_t target_uid[3] = {uid[0], uid[1], uid[2]};
+    if (uid_len != sizeof(target_uid)) {
+        ESP_LOGW(TAG, "PN532 target mode uses 3-byte NFCID1t; saved UID len=%u will be truncated",
+                 (unsigned)uid_len);
+    }
+
+    static const uint8_t felica_params[18] = {
+        0x01, 0xFE, 0xA2, 0xA3, 0xA4, 0xA5, 0xA6, 0xA7,
+        0xC0, 0xC1, 0xC2, 0xC3, 0xC4, 0xC5, 0xC6, 0xC7,
+        0xFF, 0xFF,
+    };
+
+    uint8_t nfcid3[10] = {0xAA, 0x99, 0x88, 0x77, 0x66, 0x55, 0x44, 0x33, 0x22, 0x11};
+    for (size_t i = 0; i < uid_len && i < sizeof(nfcid3); ++i) {
+        nfcid3[i] = uid[i];
+    }
+
+    uint8_t params[37];
+    size_t offset = 0;
+    params[offset++] = 0x00;
+    params[offset++] = 0x04;
+    params[offset++] = 0x00;
+    memcpy(params + offset, target_uid, sizeof(target_uid));
+    offset += sizeof(target_uid);
+    params[offset++] = 0x20;
+    memcpy(params + offset, felica_params, sizeof(felica_params));
+    offset += sizeof(felica_params);
+    memcpy(params + offset, nfcid3, sizeof(nfcid3));
+    offset += sizeof(nfcid3);
+    params[offset++] = 0x00;
+    params[offset++] = 0x00;
+
+    uint8_t response[64];
+    size_t response_len = sizeof(response);
+    ESP_LOGI(TAG, "starting PN532 target mode uid=%02X%02X%02X", target_uid[0], target_uid[1], target_uid[2]);
+    if (!pn532_execute_command(s_pn532, PN532_COMMAND_TGINITASTARGET, params, offset, response, &response_len,
+                               NFC_EMULATE_TIMEOUT_MS)) {
+        return ESP_ERR_TIMEOUT;
+    }
+
+    ESP_LOGI(TAG, "PN532 target activated response_len=%u mode=0x%02X",
+             (unsigned)response_len, response_len > 0 ? response[0] : 0);
+    for (int i = 0; !s_emulation_stop_requested && i < 8; ++i) {
+        if (!nfc_target_reply_once()) {
+            break;
+        }
+    }
+    return ESP_OK;
+}
+
+static void nfc_emulation_task(void *arg)
+{
+    (void)arg;
+    uint8_t uid[NFC_UID_MAX_LEN];
+    size_t uid_len = s_emulation_uid_len;
+    memcpy(uid, s_emulation_uid, uid_len);
+
+    while (!s_emulation_stop_requested) {
+        esp_err_t err = nfc_emulate_uid_once(uid, uid_len);
+        if (err != ESP_OK && err != ESP_ERR_TIMEOUT) {
+            ESP_LOGW(TAG, "target mode failed: %s", esp_err_to_name(err));
+            break;
+        }
+        vTaskDelay(pdMS_TO_TICKS(20));
+    }
+
+    if (s_pn532 != NULL) {
+        (void)pn532_set_rf_off(s_pn532);
+    }
+    s_emulating = false;
+    s_emulation_task = NULL;
+    vTaskDelete(NULL);
+}
+
 esp_err_t nfc_emulate_uid(const uint8_t *uid, size_t uid_len)
 {
-    (void)uid;
-    (void)uid_len;
-    return ESP_ERR_NOT_SUPPORTED;
+    if (uid == NULL || uid_len < 3 || uid_len > NFC_UID_MAX_LEN) {
+        return ESP_ERR_INVALID_ARG;
+    }
+    if (s_emulation_task != NULL) {
+        return ESP_OK;
+    }
+
+    esp_err_t err = nfc_init();
+    if (err != ESP_OK) {
+        return err;
+    }
+
+    memcpy(s_emulation_uid, uid, uid_len);
+    s_emulation_uid_len = uid_len;
+    s_emulation_stop_requested = false;
+    s_emulating = true;
+
+    BaseType_t task_ok = xTaskCreate(nfc_emulation_task, "nfc_emu", NFC_EMULATE_TASK_STACK, NULL,
+                                     NFC_EMULATE_TASK_PRIO, &s_emulation_task);
+    if (task_ok != pdPASS) {
+        s_emulating = false;
+        s_emulation_task = NULL;
+        return ESP_ERR_NO_MEM;
+    }
+    return ESP_OK;
+}
+
+void nfc_emulation_stop(void)
+{
+    s_emulation_stop_requested = true;
+    if (s_emulation_task == NULL) {
+        s_emulating = false;
+    }
+}
+
+bool nfc_emulation_is_active(void)
+{
+    return s_emulating;
 }
 
 const char *nfc_subtype_name(nfc_tag_subtype_t subtype)
