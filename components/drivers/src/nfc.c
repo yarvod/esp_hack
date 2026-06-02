@@ -26,6 +26,8 @@ static volatile bool s_emulation_stop_requested;
 static TaskHandle_t s_emulation_task;
 static uint8_t s_emulation_uid[NFC_UID_MAX_LEN];
 static size_t s_emulation_uid_len;
+static uint16_t s_emulation_atqa;
+static uint8_t s_emulation_sak;
 
 static nfc_tag_subtype_t map_subtype(pn532_nfc_type_t subtype)
 {
@@ -207,12 +209,18 @@ static bool nfc_target_reply_once(void)
                                  response, &response_len, 250);
 }
 
-static esp_err_t nfc_emulate_uid_once(const uint8_t *uid, size_t uid_len)
+static esp_err_t nfc_emulate_uid_once(const uint8_t *uid, size_t uid_len, uint16_t atqa, uint8_t sak)
 {
-    uint8_t target_uid[3] = {uid[0], uid[1], uid[2]};
-    if (uid_len != sizeof(target_uid)) {
-        ESP_LOGW(TAG, "PN532 target mode uses 3-byte NFCID1t; saved UID len=%u will be truncated",
-                 (unsigned)uid_len);
+    // PN532 target mode for ISO14443A uses 3-byte NFCID1t.
+    // For 4-byte UID, the first byte is often 0x08 (if random) or handled by PN532.
+    // For 7-byte UID, it's definitely truncated.
+    // We'll use the LAST 3 bytes of the UID which often works better for some readers.
+    uint8_t target_uid[3];
+    if (uid_len >= 3) {
+        memcpy(target_uid, uid + (uid_len - 3), 3);
+    } else {
+        memset(target_uid, 0, 3);
+        memcpy(target_uid, uid, uid_len);
     }
 
     static const uint8_t felica_params[18] = {
@@ -228,29 +236,31 @@ static esp_err_t nfc_emulate_uid_once(const uint8_t *uid, size_t uid_len)
 
     uint8_t params[37];
     size_t offset = 0;
-    params[offset++] = 0x00;
-    params[offset++] = 0x04;
-    params[offset++] = 0x00;
-    memcpy(params + offset, target_uid, sizeof(target_uid));
-    offset += sizeof(target_uid);
-    params[offset++] = 0x20;
+    params[offset++] = 0x00; // Mode: Passive only
+    
+    // MifareParams (6 bytes): ATQA (2), NFCID1t (3), SAK (1)
+    params[offset++] = (uint8_t)(atqa & 0xFF);        // SENS_RES LSB
+    params[offset++] = (uint8_t)((atqa >> 8) & 0xFF); // SENS_RES MSB
+    memcpy(params + offset, target_uid, 3);           // NFCID1t
+    offset += 3;
+    params[offset++] = sak;                           // SEL_RES
+
     memcpy(params + offset, felica_params, sizeof(felica_params));
     offset += sizeof(felica_params);
     memcpy(params + offset, nfcid3, sizeof(nfcid3));
     offset += sizeof(nfcid3);
-    params[offset++] = 0x00;
-    params[offset++] = 0x00;
+    params[offset++] = 0x00; // LenGt
+    params[offset++] = 0x00; // LenTk
 
     uint8_t response[64];
     size_t response_len = sizeof(response);
-    ESP_LOGI(TAG, "starting PN532 target mode uid=%02X%02X%02X", target_uid[0], target_uid[1], target_uid[2]);
+    // Use smaller timeout to be more responsive to stop requests
     if (!pn532_execute_command(s_pn532, PN532_COMMAND_TGINITASTARGET, params, offset, response, &response_len,
-                               NFC_EMULATE_TIMEOUT_MS)) {
+                               1000)) {
         return ESP_ERR_TIMEOUT;
     }
 
-    ESP_LOGI(TAG, "PN532 target activated response_len=%u mode=0x%02X",
-             (unsigned)response_len, response_len > 0 ? response[0] : 0);
+    ESP_LOGI(TAG, "PN532 target activated by reader");
     for (int i = 0; !s_emulation_stop_requested && i < 8; ++i) {
         if (!nfc_target_reply_once()) {
             break;
@@ -264,15 +274,19 @@ static void nfc_emulation_task(void *arg)
     (void)arg;
     uint8_t uid[NFC_UID_MAX_LEN];
     size_t uid_len = s_emulation_uid_len;
+    uint16_t atqa = s_emulation_atqa;
+    uint8_t sak = s_emulation_sak;
     memcpy(uid, s_emulation_uid, uid_len);
 
+    ESP_LOGI(TAG, "emulation started: uid_len=%u atqa=%04X sak=%02X", (unsigned)uid_len, atqa, sak);
+
     while (!s_emulation_stop_requested) {
-        esp_err_t err = nfc_emulate_uid_once(uid, uid_len);
+        esp_err_t err = nfc_emulate_uid_once(uid, uid_len, atqa, sak);
         if (err != ESP_OK && err != ESP_ERR_TIMEOUT) {
             ESP_LOGW(TAG, "target mode failed: %s", esp_err_to_name(err));
             break;
         }
-        vTaskDelay(pdMS_TO_TICKS(20));
+        vTaskDelay(pdMS_TO_TICKS(10));
     }
 
     if (s_pn532 != NULL) {
@@ -283,7 +297,7 @@ static void nfc_emulation_task(void *arg)
     vTaskDelete(NULL);
 }
 
-esp_err_t nfc_emulate_uid(const uint8_t *uid, size_t uid_len)
+esp_err_t nfc_emulate_uid(const uint8_t *uid, size_t uid_len, uint16_t atqa, uint8_t sak)
 {
     if (uid == NULL || uid_len < 3 || uid_len > NFC_UID_MAX_LEN) {
         return ESP_ERR_INVALID_ARG;
@@ -299,6 +313,8 @@ esp_err_t nfc_emulate_uid(const uint8_t *uid, size_t uid_len)
 
     memcpy(s_emulation_uid, uid, uid_len);
     s_emulation_uid_len = uid_len;
+    s_emulation_atqa = atqa;
+    s_emulation_sak = sak;
     s_emulation_stop_requested = false;
     s_emulating = true;
 

@@ -38,7 +38,7 @@ void nfc_deinit(void);
 bool nfc_is_ready(void);
 esp_err_t nfc_get_firmware(uint32_t *firmware);
 esp_err_t nfc_scan(nfc_tag_t *tag);
-esp_err_t nfc_emulate_uid(const uint8_t *uid, size_t uid_len);
+esp_err_t nfc_emulate_uid(const uint8_t *uid, size_t uid_len, uint16_t atqa, uint8_t sak);
 void nfc_emulation_stop(void);
 bool nfc_emulation_is_active(void);
 const char *nfc_subtype_name(nfc_tag_subtype_t subtype);

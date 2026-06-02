@@ -209,7 +209,7 @@ static void emulate_active(core_context_t *ctx, keys_app_state_t *state)
         return;
     }
     const key_store_record_t *record = &state->records[state->active_index];
-    esp_err_t err = nfc_emulate_uid(record->uid, record->uid_len);
+    esp_err_t err = nfc_emulate_uid(record->uid, record->uid_len, record->atqa, record->sak);
     if (err == ESP_OK) {
         state->is_emulating = true;
         state->view = KEYS_VIEW_EMULATE;
