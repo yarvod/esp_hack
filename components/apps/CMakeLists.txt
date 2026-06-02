@@ -16,5 +16,5 @@ idf_component_register(
         "src/wifi_tools.c"
         "src/bluetooth_app.c"
     INCLUDE_DIRS "include"
-    REQUIRES core ui system drivers nvs_flash esp_wifi esp_event bt esp_http_server json jef-sure__pn532
+    REQUIRES core ui system drivers nvs_flash esp_wifi esp_event bt esp_http_server json
 )

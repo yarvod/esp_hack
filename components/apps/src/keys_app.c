@@ -1,18 +1,13 @@
 #include "core/app_manager.h"
 #include "core/context.h"
 
-#include <stdlib.h>
 #include <stdio.h>
 #include <string.h>
-#include "drivers/board_pins.h"
+#include "drivers/nfc.h"
 #include "esp_err.h"
-#include "esp_log.h"
-#include "pn532.h"
 #include "system/key_store.h"
 #include "ui/status_bar.h"
 #include "ui/widgets.h"
-
-static const char *TAG = "keys_app";
 
 typedef enum {
     KEYS_VIEW_LIST = 0,
@@ -44,10 +39,6 @@ typedef struct {
 } keys_app_state_t;
 
 static keys_app_state_t s_keys;
-static pn532_t *s_pn532;
-static bool s_pn532_ready;
-
-#define PN532_SPI_CLOCK_HZ 100000
 
 static const char *ACTIONS[] = {
     "Emulate",
@@ -83,45 +74,9 @@ static void reload_keys(keys_app_state_t *state)
     }
 }
 
-static esp_err_t ensure_pn532(void)
-{
-    if (s_pn532_ready) {
-        return ESP_OK;
-    }
-
-    ESP_LOGI(TAG, "PN532 SPI init host=%d sck=%d miso=%d mosi=%d cs=%d clock=%dHz",
-             SPI2_HOST, BOARD_PIN_NFC_SPI_SCK, BOARD_PIN_NFC_SPI_MISO,
-             BOARD_PIN_NFC_SPI_MOSI, BOARD_PIN_NFC_SPI_CS, PN532_SPI_CLOCK_HZ);
-    pn532_bus_t *bus = pn532_spi_init(SPI2_HOST, BOARD_PIN_NFC_SPI_SCK, BOARD_PIN_NFC_SPI_MISO,
-                                      BOARD_PIN_NFC_SPI_MOSI, BOARD_PIN_NFC_SPI_CS, PN532_SPI_CLOCK_HZ);
-    if (bus == NULL) {
-        ESP_LOGW(TAG, "pn532 spi bus init failed");
-        return ESP_FAIL;
-    }
-
-    s_pn532 = pn532_init(bus, GPIO_NUM_NC, GPIO_NUM_NC);
-    if (s_pn532 == NULL) {
-        pn532_bus_destroy(bus);
-        ESP_LOGW(TAG, "pn532 init failed");
-        return ESP_FAIL;
-    }
-
-    uint32_t firmware = pn532_get_firmware_version(s_pn532);
-    if (firmware == 0) {
-        pn532_deinit(s_pn532, true);
-        s_pn532 = NULL;
-        ESP_LOGW(TAG, "pn532 firmware read failed");
-        return ESP_FAIL;
-    }
-
-    ESP_LOGI(TAG, "PN532 firmware=0x%08lx", (unsigned long)firmware);
-    s_pn532_ready = true;
-    return ESP_OK;
-}
-
 static void begin_scan(core_context_t *ctx, keys_app_state_t *state, size_t active_index, keys_view_t return_view)
 {
-    esp_err_t err = ensure_pn532();
+    esp_err_t err = nfc_init();
     if (err != ESP_OK) {
         set_message(state, "NFC ERROR", esp_err_to_name(err), return_view);
         core_nav_mark_dirty(&ctx->nav);
@@ -136,27 +91,24 @@ static void begin_scan(core_context_t *ctx, keys_app_state_t *state, size_t acti
     core_nav_mark_dirty(&ctx->nav);
 }
 
-static void fill_record_from_uid(key_store_record_t *record, const pn532_uid_t *uid, const char *name)
+static void fill_record_from_tag(key_store_record_t *record, const nfc_tag_t *tag, const char *name)
 {
     memset(record, 0, sizeof(*record));
     snprintf(record->name, sizeof(record->name), "%s", name);
     record->type = KEY_STORE_TYPE_ISO14443A_UID;
-    size_t uid_len = 0;
-    if (uid != NULL && uid->uid_length > 0) {
-        uid_len = (size_t)uid->uid_length;
-    }
+    size_t uid_len = tag != NULL ? tag->uid_len : 0;
     if (uid_len > KEY_STORE_UID_MAX_LEN) {
         uid_len = KEY_STORE_UID_MAX_LEN;
     }
     record->uid_len = (uint8_t)uid_len;
     if (uid_len > 0) {
-        memcpy(record->uid, uid->uid, uid_len);
+        memcpy(record->uid, tag->uid, uid_len);
     }
-    record->atqa = uid != NULL ? uid->atqa : 0;
-    record->sak = uid != NULL ? uid->sak : 0;
+    record->atqa = tag != NULL ? tag->atqa : 0;
+    record->sak = tag != NULL ? tag->sak : 0;
 }
 
-static void handle_scanned_uid(core_context_t *ctx, keys_app_state_t *state, const pn532_uid_t *uid)
+static void handle_scanned_tag(core_context_t *ctx, keys_app_state_t *state, const nfc_tag_t *tag)
 {
     state->is_scanning = false;
 
@@ -165,7 +117,7 @@ static void handle_scanned_uid(core_context_t *ctx, keys_app_state_t *state, con
         snprintf(name, sizeof(name), "KEY %02u", (unsigned)(state->count + 1));
 
         key_store_record_t record;
-        fill_record_from_uid(&record, uid, name);
+        fill_record_from_tag(&record, tag, name);
         esp_err_t err = key_store_add(&record);
         reload_keys(state);
         set_message(state, err == ESP_OK ? "SAVED" : "SAVE ERROR",
@@ -174,7 +126,7 @@ static void handle_scanned_uid(core_context_t *ctx, keys_app_state_t *state, con
         key_store_record_t record = state->records[state->active_index];
         char name[KEY_STORE_NAME_LEN];
         snprintf(name, sizeof(name), "%s", record.name);
-        fill_record_from_uid(&record, uid, name);
+        fill_record_from_tag(&record, tag, name);
 
         esp_err_t err = key_store_update(state->active_index, &record);
         reload_keys(state);
@@ -256,7 +208,9 @@ static void emulate_active(core_context_t *ctx, keys_app_state_t *state)
     if (state->active_index >= state->count) {
         return;
     }
-    set_message(state, "EMULATE", "Not supported yet", KEYS_VIEW_ACTIONS);
+    const key_store_record_t *record = &state->records[state->active_index];
+    esp_err_t err = nfc_emulate_uid(record->uid, record->uid_len);
+    set_message(state, "EMULATE", err == ESP_OK ? "Started" : esp_err_to_name(err), KEYS_VIEW_ACTIONS);
     core_nav_mark_dirty(&ctx->nav);
 }
 
@@ -421,12 +375,14 @@ static void keys_on_update(core_context_t *ctx, core_screen_t *screen, uint32_t 
     }
     state->scan_elapsed_ms = 0;
 
-    pn532_uids_array_t *uids = pn532_14443_get_all_uids(s_pn532);
-    if (uids != NULL && uids->uids_count > 0) {
-        handle_scanned_uid(ctx, state, &uids->uids[0]);
-        free(uids);
-    } else {
-        free(uids);
+    nfc_tag_t tag;
+    esp_err_t err = nfc_scan(&tag);
+    if (err == ESP_OK) {
+        handle_scanned_tag(ctx, state, &tag);
+    } else if (err != ESP_ERR_NOT_FOUND && err != ESP_ERR_TIMEOUT) {
+        state->is_scanning = false;
+        set_message(state, "SCAN ERROR", esp_err_to_name(err), state->scan_return);
+        core_nav_mark_dirty(&ctx->nav);
     }
 }
 
@@ -482,7 +438,7 @@ static void draw_scan(keys_app_state_t *state, ui_t *ui)
 {
     ui_status_bar_render(ui, state->active_index == (size_t)-1 ? "NEW KEY" : "REWRITE");
     ui_draw_text_aligned(ui, 0, 24, UI_WIDTH, "Hold tag near", UI_ALIGN_CENTER, true);
-    ui_draw_text_aligned(ui, 0, 36, UI_WIDTH, "PN532 antenna", UI_ALIGN_CENTER, true);
+    ui_draw_text_aligned(ui, 0, 36, UI_WIDTH, "NFC antenna", UI_ALIGN_CENTER, true);
     ui_draw_text_aligned(ui, 0, 55, UI_WIDTH, "BACK: cancel", UI_ALIGN_CENTER, true);
 }
 
