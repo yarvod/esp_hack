@@ -12,7 +12,7 @@
 
 #define MAX_RESULTS 16
 typedef enum { V_MAIN, V_SCAN, V_WEB, V_SNIF, V_RESL } view_t;
-typedef struct { core_screen_t s; view_t v; size_t sel; wifi_ap_record_t ap[MAX_RESULTS]; uint16_t c; bool i; httpd_handle_t srv; } st_t;
+typedef struct { core_screen_t s; view_t v; size_t sel; wifi_ap_record_t ap[MAX_RESULTS]; uint16_t c; bool i; httpd_handle_t srv; bool web_active; } st_t;
 static st_t s_w;
 
 static esp_err_t api_st(httpd_req_t *r) {
@@ -73,19 +73,39 @@ static void w_i(wifi_mode_t m) {
     if (!s_w.i) { nvs_flash_init(); esp_netif_init(); esp_event_loop_create_default(); esp_netif_create_default_wifi_sta(); esp_netif_create_default_wifi_ap(); wifi_init_config_t cfg = WIFI_INIT_CONFIG_DEFAULT(); esp_wifi_init(&cfg); s_w.i = true; }
     esp_wifi_stop(); esp_wifi_set_mode(m); esp_wifi_start();
 }
+
+static void w_web_start() {
+    w_i(WIFI_MODE_AP); 
+    wifi_config_t ac={.ap={.ssid="esp32c6_hack",.password="12345678",.authmode=WIFI_AUTH_WPA2_PSK,.max_connection=4}}; 
+    esp_wifi_set_config(WIFI_IF_AP, &ac); 
+    wifi_tools_dns_server_start(); 
+    s_srv(); 
+    s_w.web_active = true;
+}
+
+static void w_web_stop() {
+    wifi_tools_dns_server_stop();
+    if (s_w.srv) {
+        httpd_stop(s_w.srv);
+        s_w.srv = NULL;
+    }
+    w_i(WIFI_MODE_STA);
+    s_w.web_active = false;
+}
+
 static void w_up(core_context_t *ctx, core_screen_t *sc, uint32_t dt) {
     if (s_w.v == V_SCAN) { uint16_t ac=0; if (esp_wifi_scan_get_ap_num(&ac)==ESP_OK && ac>0) { s_w.c=(ac>MAX_RESULTS)?MAX_RESULTS:ac; esp_wifi_scan_get_ap_records(&s_w.c, s_w.ap); s_w.v=V_RESL; s_w.sel=0; core_nav_mark_dirty(&ctx->nav); } }
 }
 static bool w_in(core_context_t *ctx, core_screen_t *sc, const core_input_event_t *e) {
     if (e->phase != CORE_INPUT_PHASE_PRESS) return false;
-    if (e->action == CORE_INPUT_BACK) { if(s_w.v != V_MAIN) { wifi_tools_sniffer_stop(); wifi_tools_dns_server_stop(); s_w.v = V_MAIN; s_w.sel = 0; core_nav_mark_dirty(&ctx->nav); return true; } return false; }
+    if (e->action == CORE_INPUT_BACK) { if(s_w.v != V_MAIN) { wifi_tools_sniffer_stop(); s_w.v = V_MAIN; s_w.sel = 0; core_nav_mark_dirty(&ctx->nav); return true; } return false; }
     int c = (s_w.v == V_MAIN) ? 4 : (s_w.v == V_RESL) ? s_w.c : 0;
     if (e->action == CORE_INPUT_UP && c > 0) { s_w.sel = (s_w.sel + c - 1) % c; core_nav_mark_dirty(&ctx->nav); return true; }
     if (e->action == CORE_INPUT_DOWN && c > 0) { s_w.sel = (s_w.sel + 1) % c; core_nav_mark_dirty(&ctx->nav); return true; }
     if (e->action == CORE_INPUT_SELECT) {
         if (s_w.v == V_MAIN) {
             if (s_w.sel == 0) { w_i(WIFI_MODE_STA); s_w.v = V_SCAN; wifi_scan_config_t sc={0}; sc.show_hidden=true; sc.scan_type=WIFI_SCAN_TYPE_ACTIVE; esp_wifi_scan_start(&sc, false); }
-            else if (s_w.sel == 1) { w_i(WIFI_MODE_AP); wifi_config_t ac={.ap={.ssid="esp32c6_hack",.password="12345678",.authmode=WIFI_AUTH_WPA2_PSK,.max_connection=4}}; esp_wifi_set_config(WIFI_IF_AP, &ac); wifi_tools_dns_server_start(); s_srv(); s_w.v = V_WEB; }
+            else if (s_w.sel == 1) { s_w.v = V_WEB; }
             else if (s_w.sel == 2) { w_i(WIFI_MODE_STA); wifi_tools_sniffer_start(); s_w.v = V_SNIF; }
             else if (s_w.sel == 3) {
                 if(wifi_tools_beacon_is_running()) {
@@ -96,6 +116,9 @@ static bool w_in(core_context_t *ctx, core_screen_t *sc, const core_input_event_
                     wifi_tools_beacon_spam_start(NULL, 0);
                 }
             }
+        } else if (s_w.v == V_WEB) {
+            if (s_w.web_active) w_web_stop();
+            else w_web_start();
         }
         core_nav_mark_dirty(&ctx->nav); return true;
     }
@@ -109,10 +132,16 @@ static void w_r(core_context_t *ctx, core_screen_t *sc, ui_t *ui) {
             int y=18+i*11; 
             if(i==s_w.sel) ui_fill_rect(ui,2,y-2,124,11,true); 
             ui_draw_text(ui,5,y,it[i],i!=s_w.sel); 
+            if(i==1 && s_w.web_active) ui_draw_text(ui, 90, y, "RUN", i!=s_w.sel);
             if(i==3 && wifi_tools_beacon_is_running()) ui_draw_text(ui, 90, y, "RUN", i!=s_w.sel);
         }
     } else if (s_w.v == V_SCAN) { ui_draw_text(ui, 5, 30, "SCANNING...", true);
-    } else if (s_w.v == V_WEB) { ui_draw_text(ui, 5, 20, "SSID: esp32c6_hack", true); ui_draw_text(ui, 5, 32, "PASS: 12345678", true); ui_draw_text(ui, 5, 44, "IP: 192.168.4.1", true); ui_draw_text(ui, 5, 56, "PORTAL: ACTIVE", true);
+    } else if (s_w.v == V_WEB) { 
+        ui_draw_text(ui, 5, 20, "SSID: esp32c6_hack", true); 
+        ui_draw_text(ui, 5, 32, "PASS: 12345678", true); 
+        ui_draw_text(ui, 5, 44, "IP: 192.168.4.1", true); 
+        ui_fill_rect(ui, 2, 53, 124, 11, true);
+        ui_draw_text_aligned(ui, 0, 55, UI_WIDTH, s_w.web_active ? "< STOP >" : "< START >", UI_ALIGN_CENTER, false);
     } else if (s_w.v == V_SNIF) { sniffer_stats_t s; wifi_tools_get_sniffer_stats(&s); char b[32]; snprintf(b,32,"Total: %lu",s.total); ui_draw_text(ui, 5, 30, b, true); snprintf(b,32,"Mgmt: %lu",s.mgmt); ui_draw_text(ui, 5, 42, b, true); core_nav_mark_dirty(&ctx->nav);
     } else if (s_w.v == V_RESL) {
         for (int i=0; i<4; i++) { int idx=(s_w.sel/4)*4+i; if(idx>=s_w.c) break; int y=15+i*10; if(idx==s_w.sel) ui_fill_rect(ui,2,y-1,124,9,true); char b[32]; snprintf(b,32,"%-12.12s %d", (char*)s_w.ap[idx].ssid, s_w.ap[idx].rssi); ui_draw_text(ui,5,y,b,idx!=s_w.sel); }
