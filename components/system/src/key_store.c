@@ -96,7 +96,7 @@ esp_err_t key_store_load_all(key_store_record_t *records, size_t capacity, size_
 
     size_t loaded = 0;
     for (size_t i = 0; i < stored_count && loaded < capacity; ++i) {
-        char key[8];
+        char key[16];
         slot_key(i, key, sizeof(key));
         key_store_record_t record;
         size_t len = sizeof(record);
@@ -123,7 +123,7 @@ esp_err_t key_store_add(const key_store_record_t *record)
         key_store_record_t copy = *record;
         normalize_record(&copy);
         ESP_GOTO_ON_FALSE(record_valid(&copy), ESP_ERR_INVALID_ARG, cleanup, TAG, "invalid record");
-        char key[8];
+        char key[16];
         slot_key(count, key, sizeof(key));
         ESP_GOTO_ON_ERROR(nvs_set_blob(handle, key, &copy, sizeof(copy)), cleanup, TAG, "blob write failed");
         ESP_GOTO_ON_ERROR(set_count(handle, count + 1), cleanup, TAG, "count write failed");
@@ -147,7 +147,7 @@ esp_err_t key_store_update(size_t index, const key_store_record_t *record)
         key_store_record_t copy = *record;
         normalize_record(&copy);
         ESP_GOTO_ON_FALSE(record_valid(&copy), ESP_ERR_INVALID_ARG, cleanup, TAG, "invalid record");
-        char key[8];
+        char key[16];
         slot_key(index, key, sizeof(key));
         ESP_GOTO_ON_ERROR(nvs_set_blob(handle, key, &copy, sizeof(copy)), cleanup, TAG, "blob write failed");
         ret = nvs_commit(handle);
@@ -169,12 +169,12 @@ esp_err_t key_store_delete(size_t index)
     ESP_RETURN_ON_ERROR(open_store(NVS_READWRITE, &handle), TAG, "open failed");
     esp_err_t ret = ESP_OK;
     for (size_t i = index; i + 1 < count; ++i) {
-        char key[8];
+        char key[16];
         slot_key(i, key, sizeof(key));
         ESP_GOTO_ON_ERROR(nvs_set_blob(handle, key, &records[i + 1], sizeof(records[i + 1])),
                           cleanup, TAG, "compact write failed");
     }
-    char last_key[8];
+    char last_key[16];
     slot_key(count - 1, last_key, sizeof(last_key));
     ret = nvs_erase_key(handle, last_key);
     if (ret == ESP_ERR_NVS_NOT_FOUND) {

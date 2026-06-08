@@ -217,7 +217,7 @@ void app_main(void)
     int64_t last_us = esp_timer_get_time();
     while (true) {
         core_event_t event;
-        uint32_t wait_ms = s_core.low_power_mode ? 50 : 16;
+        uint32_t wait_ms = s_core.low_power_mode ? 50 : 10;
         if (core_event_bus_receive(&s_core.events, &event, pdMS_TO_TICKS(wait_ms))) {
             handle_event(&s_core, &event);
         }
