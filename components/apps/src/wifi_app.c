@@ -14,7 +14,6 @@
 typedef enum { V_MAIN, V_SCAN, V_WEB, V_SNIF, V_RESL } view_t;
 typedef struct { core_screen_t s; view_t v; size_t sel; wifi_ap_record_t ap[MAX_RESULTS]; uint16_t c; bool i; httpd_handle_t srv; } st_t;
 static st_t s_w;
-static const char* ssids[] = {"Free WiFi", "FBI Surveillance", "HACKED!", "Flipper Zero", "ESP32-C6 Hack", NULL};
 
 static esp_err_t api_st(httpd_req_t *r) {
     cJSON *root = cJSON_CreateObject(); sniffer_stats_t s; wifi_tools_get_sniffer_stats(&s);
@@ -30,7 +29,7 @@ static esp_err_t api_ctrl(httpd_req_t *r) {
     if (root) {
         cJSON *cmd = cJSON_GetObjectItem(root, "cmd");
         if (cmd) {
-            if (!strcmp(cmd->valuestring, "beacon_on")) wifi_tools_beacon_spam_start(ssids, 5);
+            if (!strcmp(cmd->valuestring, "beacon_on")) wifi_tools_beacon_spam_start(NULL, 0);
             else if (!strcmp(cmd->valuestring, "beacon_off")) wifi_tools_beacon_spam_stop();
             else if (!strcmp(cmd->valuestring, "ble_on")) wifi_tools_ble_spam_start(0);
             else if (!strcmp(cmd->valuestring, "ble_off")) wifi_tools_ble_spam_stop();
@@ -88,7 +87,15 @@ static bool w_in(core_context_t *ctx, core_screen_t *sc, const core_input_event_
             if (s_w.sel == 0) { w_i(WIFI_MODE_STA); s_w.v = V_SCAN; wifi_scan_config_t sc={0}; sc.show_hidden=true; sc.scan_type=WIFI_SCAN_TYPE_ACTIVE; esp_wifi_scan_start(&sc, false); }
             else if (s_w.sel == 1) { w_i(WIFI_MODE_AP); wifi_config_t ac={.ap={.ssid="esp32c6_hack",.password="12345678",.authmode=WIFI_AUTH_WPA2_PSK,.max_connection=4}}; esp_wifi_set_config(WIFI_IF_AP, &ac); wifi_tools_dns_server_start(); s_srv(); s_w.v = V_WEB; }
             else if (s_w.sel == 2) { w_i(WIFI_MODE_STA); wifi_tools_sniffer_start(); s_w.v = V_SNIF; }
-            else if (s_w.sel == 3) { if(wifi_tools_beacon_is_running()) wifi_tools_beacon_spam_stop(); else wifi_tools_beacon_spam_start(ssids, 5); }
+            else if (s_w.sel == 3) {
+                if(wifi_tools_beacon_is_running()) {
+                    wifi_tools_beacon_spam_stop();
+                } else {
+                    w_i(WIFI_MODE_STA);
+                    esp_wifi_set_promiscuous(true);
+                    wifi_tools_beacon_spam_start(NULL, 0);
+                }
+            }
         }
         core_nav_mark_dirty(&ctx->nav); return true;
     }
@@ -98,8 +105,12 @@ static void w_r(core_context_t *ctx, core_screen_t *sc, ui_t *ui) {
     ui_status_bar_render(ui, "WIFI TOOLS");
     if (s_w.v == V_MAIN) {
         const char *it[] = {"SCANNER", "WEB CONSOLE", "SNIFFER", "BEACON SPAM"};
-        for (int i=0; i<4; i++) { int y=18+i*11; if(i==s_w.sel) ui_fill_rect(ui,2,y-2,124,11,true); ui_draw_text(ui,5,y,it[i],i!=s_w.sel); }
-        if(wifi_tools_beacon_is_running()) ui_draw_text(ui, 100, 54, "RUN", true);
+        for (int i=0; i<4; i++) { 
+            int y=18+i*11; 
+            if(i==s_w.sel) ui_fill_rect(ui,2,y-2,124,11,true); 
+            ui_draw_text(ui,5,y,it[i],i!=s_w.sel); 
+            if(i==3 && wifi_tools_beacon_is_running()) ui_draw_text(ui, 90, y, "RUN", i!=s_w.sel);
+        }
     } else if (s_w.v == V_SCAN) { ui_draw_text(ui, 5, 30, "SCANNING...", true);
     } else if (s_w.v == V_WEB) { ui_draw_text(ui, 5, 20, "SSID: esp32c6_hack", true); ui_draw_text(ui, 5, 32, "PASS: 12345678", true); ui_draw_text(ui, 5, 44, "IP: 192.168.4.1", true); ui_draw_text(ui, 5, 56, "PORTAL: ACTIVE", true);
     } else if (s_w.v == V_SNIF) { sniffer_stats_t s; wifi_tools_get_sniffer_stats(&s); char b[32]; snprintf(b,32,"Total: %lu",s.total); ui_draw_text(ui, 5, 30, b, true); snprintf(b,32,"Mgmt: %lu",s.mgmt); ui_draw_text(ui, 5, 42, b, true); core_nav_mark_dirty(&ctx->nav);

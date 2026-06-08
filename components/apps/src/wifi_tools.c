@@ -16,16 +16,43 @@ static bool s_ble_spam_running = false;
 static sniffer_stats_t s_stats = {0};
 
 static void beacon_task(void *pv) {
-    const char** ssids = (const char**)pv;
-    int count = 0; while(ssids[count] != NULL) count++;
-    if (count == 0) { s_beacon_running = false; vTaskDelete(NULL); return; }
+    (void)pv;
     
     // Allocate 32-bit aligned buffer for the WiFi driver
     uint8_t *pkt = malloc(256);
     if (!pkt) { s_beacon_running = false; vTaskDelete(NULL); return; }
     
+    uint16_t ap_count = 0;
+    esp_wifi_scan_get_ap_num(&ap_count);
+    if (ap_count > 16) ap_count = 16;
+    
+    wifi_ap_record_t *ap_records = NULL;
+    if (ap_count > 0) {
+        ap_records = malloc(sizeof(wifi_ap_record_t) * ap_count);
+        if (ap_records) {
+            esp_wifi_scan_get_ap_records(&ap_count, ap_records);
+        } else {
+            ap_count = 0;
+        }
+    }
+    
+    char random_ssids[16][32];
+    if (ap_count == 0) {
+        ap_count = 16;
+        for (int i=0; i<16; i++) {
+            snprintf(random_ssids[i], sizeof(random_ssids[i]), "WIFI-%04X", (unsigned)(esp_random() & 0xFFFF));
+        }
+    }
+    
     while(s_beacon_running) {
-        for(int i=0; i<count; i++) {
+        wifi_mode_t mode;
+        if (esp_wifi_get_mode(&mode) != ESP_OK) {
+            vTaskDelay(pdMS_TO_TICKS(100));
+            continue;
+        }
+        wifi_interface_t ifx = (mode == WIFI_MODE_AP) ? WIFI_IF_AP : WIFI_IF_STA;
+        
+        for(int i=0; i<ap_count; i++) {
             memset(pkt, 0, 256);
             int pos = 0;
             
@@ -42,24 +69,36 @@ static void beacon_task(void *pv) {
             pkt[pos++] = 0x11; pkt[pos++] = 0x04; // Capability Info
             
             // SSID Tag
-            int slen = strlen(ssids[i]);
+            const char *ssid_name = ap_records ? (const char *)ap_records[i].ssid : random_ssids[i];
+            int slen = strlen(ssid_name);
+            if (slen > 32) slen = 32;
             pkt[pos++] = 0x00; pkt[pos++] = (uint8_t)slen;
-            memcpy(pkt + pos, ssids[i], slen); pos += slen;
+            memcpy(pkt + pos, ssid_name, slen); pos += slen;
             
             // Supported Rates
             uint8_t rates[] = {0x01, 0x08, 0x82, 0x84, 0x8b, 0x96, 0x24, 0x30, 0x48, 0x6c};
             memcpy(pkt + pos, rates, sizeof(rates)); pos += sizeof(rates);
             
             // DS Parameter Set (Channel)
-            uint8_t chan = 1 + (esp_random() % 11);
+            uint8_t chan;
+            if (mode == WIFI_MODE_AP) {
+                uint8_t prim;
+                wifi_second_chan_t sec;
+                esp_wifi_get_channel(&prim, &sec);
+                chan = prim;
+                if (chan == 0) chan = 1;
+            } else {
+                chan = 1 + (esp_random() % 11);
+                esp_wifi_set_channel(chan, WIFI_SECOND_CHAN_NONE);
+            }
             pkt[pos++] = 0x03; pkt[pos++] = 0x01; pkt[pos++] = chan;
             
-            esp_wifi_set_channel(chan, WIFI_SECOND_CHAN_NONE);
-            esp_wifi_80211_tx(WIFI_IF_AP, pkt, pos, false);
+            esp_wifi_80211_tx(ifx, pkt, pos, false);
             
             vTaskDelay(pdMS_TO_TICKS(15));
         }
     }
+    if (ap_records) free(ap_records);
     free(pkt);
     vTaskDelete(NULL);
 }
@@ -136,3 +175,4 @@ static void ble_spam_task(void *pv) {
 void wifi_tools_ble_spam_start(int type) { if(s_ble_spam_running) return; s_ble_spam_running=true; xTaskCreate(ble_spam_task,"ble_spam",4096,NULL,5,NULL); }
 void wifi_tools_ble_spam_stop(void) { s_ble_spam_running=false; ble_gap_adv_stop(); }
 bool wifi_tools_ble_spam_is_running(void) { return s_ble_spam_running; }
+
