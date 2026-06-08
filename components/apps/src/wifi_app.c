@@ -132,10 +132,11 @@ static void w_r(core_context_t *ctx, core_screen_t *sc, ui_t *ui) {
             int y=18+i*11; 
             if(i==s_w.sel) ui_fill_rect(ui,2,y-2,124,11,true); 
             ui_draw_text(ui,5,y,it[i],i!=s_w.sel); 
-            if(i==1 && s_w.web_active) ui_draw_text(ui, 90, y, "RUN", i!=s_w.sel);
-            if(i==3 && wifi_tools_beacon_is_running()) ui_draw_text(ui, 90, y, "RUN", i!=s_w.sel);
+            if(i==1) ui_draw_text_aligned(ui, 72, y, 52, s_w.web_active ? "ON" : "OFF", UI_ALIGN_RIGHT, i!=s_w.sel);
+            if(i==3) ui_draw_text_aligned(ui, 72, y, 52, wifi_tools_beacon_is_running() ? "ON" : "OFF", UI_ALIGN_RIGHT, i!=s_w.sel);
         }
     } else if (s_w.v == V_SCAN) { ui_draw_text(ui, 5, 30, "SCANNING...", true);
+
     } else if (s_w.v == V_WEB) { 
         ui_draw_text(ui, 5, 20, "SSID: esp32c6_hack", true); 
         ui_draw_text(ui, 5, 32, "PASS: 12345678", true); 

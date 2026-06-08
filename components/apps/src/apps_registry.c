@@ -11,6 +11,7 @@ extern const core_app_descriptor_t g_snake_app;
 extern const core_app_descriptor_t g_tetris_app;
 extern const core_app_descriptor_t g_breakout_app;
 extern const core_app_descriptor_t g_invaders_app;
+extern const core_app_descriptor_t g_craft_app;
 extern const core_app_descriptor_t g_sleep_app;
 
 esp_err_t apps_register_all(core_context_t *ctx)
@@ -48,6 +49,10 @@ esp_err_t apps_register_all(core_context_t *ctx)
         return err;
     }
     err = core_app_manager_register(&ctx->apps, &g_invaders_app);
+    if (err != ESP_OK) {
+        return err;
+    }
+    err = core_app_manager_register(&ctx->apps, &g_craft_app);
     if (err != ESP_OK) {
         return err;
     }

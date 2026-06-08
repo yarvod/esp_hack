@@ -7,6 +7,7 @@ idf_component_register(
         "src/tetris_app.c"
         "src/breakout_app.c"
         "src/invaders_app.c"
+        "src/craft_app.c"
         "src/sleep_app.c"
         "src/home_screen.c"
         "src/keys_app.c"
